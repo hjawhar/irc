@@ -4,13 +4,15 @@
 //! The write task drains a bounded `mpsc::Receiver<Message>` fed by
 //! the rest of the server; the read task decodes incoming messages
 //! and hands them to the dispatcher. When the dispatcher says
-//! `Outcome::Disconnect`, the connection tears down cleanly.
+//! `Outcome::Disconnect`, the connection tears down cleanly,
+//! broadcasting a QUIT to every peer that shares a channel.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
-use irc_proto::{IrcCodec, Message};
+use irc_proto::{IrcCodec, Message, Params, Prefix, Tags, Verb};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_util::codec::{FramedRead, FramedWrite};
@@ -30,8 +32,7 @@ pub async fn handle_connection(state: Arc<ServerState>, stream: TcpStream, peer:
     async move {
         info!("accepted");
         run(state.clone(), stream, user_id, peer).await;
-        // Clean up state — idempotent.
-        state.remove_user(user_id);
+        cleanup(&state, user_id);
         info!("closed");
     }
     .instrument(span)
@@ -49,9 +50,8 @@ async fn run(state: Arc<ServerState>, stream: TcpStream, user_id: UserId, peer: 
     let writer = tokio::spawn(write_loop(write_half, out_rx));
     read_loop(state.clone(), user.clone(), read_half).await;
 
-    // Closing the user's write queue signals the write task to drain
-    // and exit. The user is still in the state map until
-    // handle_connection removes it.
+    // Drop the user so the mpsc sender goes away. The write task sees
+    // its receiver close and exits cleanly.
     drop(user);
     let _ = writer.await;
 }
@@ -90,6 +90,45 @@ async fn write_loop(write_half: tokio::net::tcp::OwnedWriteHalf, mut rx: mpsc::R
             return;
         }
     }
-    // Channel closed — read loop has ended. Flush and exit.
-    let _ = writer.flush().await;
+}
+
+/// Broadcast QUIT to every channel peer and remove the user from
+/// state. Safe to call for partially-registered users (it becomes a
+/// no-op for anyone without a nick).
+fn cleanup(state: &ServerState, user_id: UserId) {
+    let Some(user) = state.user(user_id) else {
+        return;
+    };
+    let peers = state.channel_peers(user_id);
+    let origin = user.origin_prefix();
+    drop(user);
+    let _ = state.purge_user_from_channels(user_id);
+    if !peers.is_empty() {
+        let quit = quit_line(&origin, None);
+        for uid in peers {
+            if let Some(u) = state.user(uid) {
+                u.send(quit.clone());
+            }
+        }
+    }
+    state.remove_user(user_id);
+}
+
+fn quit_line(origin: &Bytes, reason: Option<&Bytes>) -> Message {
+    let mut params = Params::new();
+    if let Some(r) = reason {
+        params.push_trailing(r.clone());
+    } else {
+        params.push_trailing(Bytes::from_static(b"Connection closed"));
+    }
+    Message {
+        tags: Tags::new(),
+        prefix: Some(Prefix::User {
+            nick: origin.clone(),
+            user: None,
+            host: None,
+        }),
+        verb: Verb::word(Bytes::from_static(b"QUIT")),
+        params,
+    }
 }

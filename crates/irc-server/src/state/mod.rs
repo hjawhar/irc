@@ -1,9 +1,8 @@
 //! Shared runtime state.
 //!
-//! Phase 2b wires the user registry and nickname index. Channel state
-//! lands in the next commit; the surface here is deliberately narrow
-//! so every mutation goes through a method that updates both the user
-//! map and the nickname map under the same lock discipline.
+//! The registries (users, nicks, channels) live behind their own
+//! concurrency primitives — `DashMap` for outer indexing plus a per-
+//! channel `RwLock` — so no mutation ever takes a server-wide lock.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,8 +13,10 @@ use irc_proto::Casemap;
 
 use crate::config::Config;
 
+pub mod channel;
 pub mod user;
 
+pub use channel::{Channel, MemberMode, Topic};
 pub use user::{User, UserHandle, UserId, UserRegInfo};
 
 /// Errors returned when mutating the [`ServerState`].
@@ -36,6 +37,8 @@ pub struct ServerState {
     users: DashMap<UserId, Arc<User>>,
     /// Casemap-folded nickname → owning [`UserId`].
     nicks: DashMap<Bytes, UserId>,
+    /// Casemap-folded channel name → [`Channel`] state.
+    channels: DashMap<Bytes, Arc<parking_lot::RwLock<Channel>>>,
     casemap: Casemap,
     next_user_id: AtomicU64,
 }
@@ -48,6 +51,7 @@ impl ServerState {
             config,
             users: DashMap::new(),
             nicks: DashMap::new(),
+            channels: DashMap::new(),
             casemap: Casemap::Rfc1459,
             next_user_id: AtomicU64::new(1),
         }
@@ -154,6 +158,82 @@ impl ServerState {
             .iter()
             .map(|e| UserHandle(e.value().clone()))
             .collect()
+    }
+
+    // --- channel operations ---
+
+    /// Look up a channel by name (case-folded).
+    #[must_use]
+    pub fn channel(&self, name: &[u8]) -> Option<Arc<parking_lot::RwLock<Channel>>> {
+        let folded = self.casemap.fold(name);
+        self.channels.get(&folded).map(|r| r.value().clone())
+    }
+
+    /// Get the channel, or create it with `name` as the original-case
+    /// canonical name if absent.
+    pub fn channel_or_create(&self, name: &[u8]) -> Arc<parking_lot::RwLock<Channel>> {
+        let folded = self.casemap.fold(name);
+        self.channels
+            .entry(folded)
+            .or_insert_with(|| {
+                Arc::new(parking_lot::RwLock::new(Channel::new(
+                    Bytes::copy_from_slice(name),
+                )))
+            })
+            .value()
+            .clone()
+    }
+
+    /// Remove a channel once it has no members left.
+    pub fn remove_empty_channel(&self, name: &[u8]) {
+        let folded = self.casemap.fold(name);
+        if let Some(entry) = self.channels.get(&folded) {
+            if !entry.value().read().members.is_empty() {
+                return;
+            }
+            drop(entry);
+            self.channels.remove(&folded);
+        }
+    }
+
+    /// Every user ID that shares at least one channel with `user_id`
+    /// (excluding `user_id` itself). Used for QUIT broadcasts.
+    #[must_use]
+    pub fn channel_peers(&self, user_id: UserId) -> Vec<UserId> {
+        let mut peers = std::collections::BTreeSet::new();
+        for entry in &self.channels {
+            let guard = entry.value().read();
+            if guard.has_member(user_id) {
+                for uid in guard.members.keys() {
+                    if *uid != user_id {
+                        peers.insert(*uid);
+                    }
+                }
+            }
+        }
+        peers.into_iter().collect()
+    }
+
+    /// Walk every channel the user is a member of, removing them.
+    /// Returns the list of channel names (original case) they were
+    /// in.
+    pub fn purge_user_from_channels(&self, user_id: UserId) -> Vec<Bytes> {
+        let mut emptied: Vec<Bytes> = Vec::new();
+        let mut left: Vec<Bytes> = Vec::new();
+        for entry in &self.channels {
+            let chan = entry.value();
+            let mut guard = chan.write();
+            if guard.remove_member(user_id).is_some() {
+                left.push(guard.name.clone());
+                if guard.members.is_empty() {
+                    emptied.push(guard.name.clone());
+                }
+            }
+        }
+        for name in &emptied {
+            self.remove_empty_channel(name.as_ref());
+        }
+        left
     }
 }
 
