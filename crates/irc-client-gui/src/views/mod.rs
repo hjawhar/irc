@@ -4,3 +4,4 @@ pub(crate) mod scrollback;
 pub(crate) mod treebar;
 
 pub(crate) mod channel_list;
+pub(crate) mod connect_dialog;
