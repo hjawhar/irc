@@ -242,7 +242,7 @@ Tracked in [`PLAN.md` §13](PLAN.md#13-phased-delivery). Summary:
 
 ## License
 
-To be decided before release 0.1 (likely MIT or Apache-2.0 / MIT dual). Until then, all rights reserved by the repository owner.
+MIT. See [`LICENSE-MIT`](LICENSE-MIT).
 
 ## Contributing
 
