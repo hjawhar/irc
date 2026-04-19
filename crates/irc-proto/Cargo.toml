@@ -12,6 +12,7 @@ authors.workspace = true
 bytes = "1"
 smallvec = { version = "1", features = ["union"] }
 thiserror = "1"
+tokio-util = { version = "0.7", features = ["codec"] }
 
 [dev-dependencies]
 proptest = "1"

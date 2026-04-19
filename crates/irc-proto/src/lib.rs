@@ -14,6 +14,12 @@ pub mod casemap;
 
 pub mod ident;
 
+pub mod cap;
+
+pub mod codec;
+
+pub mod isupport;
+
 pub mod command;
 
 pub mod error;
@@ -27,10 +33,13 @@ pub mod verb;
 
 mod util;
 
+pub use cap::{CapToken, parse_cap_list};
 pub use casemap::Casemap;
+pub use codec::{CodecError, IrcCodec};
 pub use command::{CapSub, Command, CommandError};
 pub use error::ParseError;
 pub use ident::{AccountName, ChannelName, IdentError, Nick, ServerName};
+pub use isupport::{Isupport, IsupportToken};
 pub use message::Message;
 pub use numeric::ReplyCode;
 pub use params::Params;
