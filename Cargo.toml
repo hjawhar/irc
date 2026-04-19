@@ -36,6 +36,9 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 # Nursery false-positives we opt out of early; revisit periodically.
 option_if_let_else = "allow"
+# `pub(crate)` inside a private module is clearer than a bare `pub` that
+# happens to have the same effective visibility; prefer explicit scoping.
+redundant_pub_crate = "allow"
 
 [profile.release]
 lto = "thin"
