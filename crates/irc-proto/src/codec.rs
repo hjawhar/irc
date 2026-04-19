@@ -130,22 +130,6 @@ impl Encoder<Message> for IrcCodec {
     }
 }
 
-impl Encoder<&Message> for IrcCodec {
-    type Error = CodecError;
-
-    fn encode(&mut self, msg: &Message, out: &mut BytesMut) -> Result<(), Self::Error> {
-        let start = out.len();
-        msg.write(out);
-        let body_len = out.len() - start;
-        if body_len + 2 > self.max_bytes {
-            out.truncate(start);
-            return Err(CodecError::LineTooLong);
-        }
-        out.extend_from_slice(b"\r\n");
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{CodecError, IrcCodec};

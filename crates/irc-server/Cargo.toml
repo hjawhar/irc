@@ -19,7 +19,7 @@ anyhow = "1"
 bytes = "1"
 clap = { version = "4", features = ["derive", "env"] }
 dashmap = "6"
-futures-util = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
