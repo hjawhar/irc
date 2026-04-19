@@ -21,10 +21,13 @@ pub mod codec;
 pub mod isupport;
 
 pub mod command;
+pub mod ctcp;
+pub mod format;
 
 pub mod error;
 pub mod limits;
 pub mod message;
+pub mod mode;
 pub mod numeric;
 pub mod params;
 pub mod prefix;
@@ -37,10 +40,13 @@ pub use cap::{CapToken, parse_cap_list};
 pub use casemap::Casemap;
 pub use codec::{CodecError, IrcCodec};
 pub use command::{CapSub, Command, CommandError};
+pub use ctcp::CtcpMessage;
 pub use error::ParseError;
+pub use format::{Color, Style, StyledSpan, parse_styled, strip_formatting};
 pub use ident::{AccountName, ChannelName, IdentError, Nick, ServerName};
 pub use isupport::{Isupport, IsupportToken};
 pub use message::Message;
+pub use mode::{ModeChange, ModeSpec, parse_channel_modes, parse_user_modes};
 pub use numeric::ReplyCode;
 pub use params::Params;
 pub use prefix::Prefix;
