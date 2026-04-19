@@ -141,46 +141,13 @@ async fn read_loop_with_deadline(
     let mut reader = FramedRead::new(read_half, IrcCodec::new());
     let mut registered = false;
     loop {
-        let frame = if registered {
-            // Already registered — no deadline.
-            reader.next().await
-        } else {
-            tokio::select! {
-                biased;
-                frame = reader.next() => frame,
-                () = &mut *deadline => {
-                    warn!("registration deadline exceeded, disconnecting");
-                    return;
-                }
-            }
-        };
+        let frame = read_frame(&mut reader, registered, deadline).await;
         let Some(frame) = frame else { return };
         match frame {
             Ok(message) => {
-                debug!(verb = ?message.verb, params = message.params.len(), "recv");
-                if registered && !bucket.try_consume() {
-                    warn!("flood detected, disconnecting");
-                    let error_msg = Message {
-                        tags: Tags::new(),
-                        prefix: None,
-                        verb: Verb::word(Bytes::from_static(b"ERROR")),
-                        params: {
-                            let mut p = Params::new();
-                            p.push_trailing(Bytes::from_static(b"Flooding"));
-                            p
-                        },
-                    };
-                    user.send(error_msg);
+                if !process_message(&state, &user, message, &mut bucket, registered).await {
                     return;
                 }
-                match dispatch(&state, &user, message).await {
-                    Outcome::Continue => {}
-                    Outcome::Disconnect => {
-                        debug!("handler requested disconnect");
-                        return;
-                    }
-                }
-                // Check registration status after each dispatched message.
                 if !registered && user.is_registered() {
                     registered = true;
                 }
@@ -189,6 +156,61 @@ async fn read_loop_with_deadline(
                 warn!(error = %e, "read error");
                 return;
             }
+        }
+    }
+}
+
+/// Read a single frame, respecting the registration deadline when not yet registered.
+async fn read_frame(
+    reader: &mut FramedRead<tokio::io::ReadHalf<MaybeTls>, IrcCodec>,
+    registered: bool,
+    deadline: &mut Pin<&mut tokio::time::Sleep>,
+) -> Option<Result<Message, irc_proto::CodecError>> {
+    if registered {
+        reader.next().await
+    } else {
+        tokio::select! {
+            biased;
+            frame = reader.next() => frame,
+            () = deadline.as_mut() => {
+                warn!("registration deadline exceeded, disconnecting");
+                None
+            }
+        }
+    }
+}
+
+/// Process a single inbound message with flood control and dispatch.
+///
+/// Returns `true` to keep reading, `false` to disconnect.
+async fn process_message(
+    state: &Arc<ServerState>,
+    user: &Arc<User>,
+    message: Message,
+    bucket: &mut FloodBucket,
+    registered: bool,
+) -> bool {
+    debug!(verb = ?message.verb, params = message.params.len(), "recv");
+    if registered && !bucket.try_consume() {
+        warn!("flood detected, disconnecting");
+        let error_msg = Message {
+            tags: Tags::new(),
+            prefix: None,
+            verb: Verb::word(Bytes::from_static(b"ERROR")),
+            params: {
+                let mut p = Params::new();
+                p.push_trailing(Bytes::from_static(b"Flooding"));
+                p
+            },
+        };
+        user.send(error_msg);
+        return false;
+    }
+    match dispatch(state, user, message).await {
+        Outcome::Continue => true,
+        Outcome::Disconnect => {
+            debug!("handler requested disconnect");
+            false
         }
     }
 }

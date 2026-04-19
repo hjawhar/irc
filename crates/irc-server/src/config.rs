@@ -39,6 +39,18 @@ pub struct Config {
     /// Abuse-control limits.
     #[serde(default)]
     pub limits: Limits,
+    /// Storage backend configuration.
+    #[serde(default)]
+    pub storage: StorageConfig,
+}
+
+/// Storage configuration.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct StorageConfig {
+    /// Path to the SQLite database file. When absent, an in-memory
+    /// store is used.
+    pub sqlite_path: Option<String>,
 }
 
 /// Listener configuration.
@@ -226,6 +238,7 @@ impl Default for ConfigBuilder {
                 ),
                 cloak_secret_file: None,
                 limits: Limits::default(),
+                storage: StorageConfig::default(),
             },
         }
     }

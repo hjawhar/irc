@@ -165,6 +165,12 @@ replycode! {
     ERR_SASLABORTED = 906,
     ERR_SASLALREADY = 907,
     RPL_SASLMECHS = 908,
+
+    // --- Account registration (custom) ---
+    RPL_REG_VERIFICATION_REQUIRED = 920,
+    RPL_REG_SUCCESS = 921,
+    ERR_REG_INVALID = 922,
+    ERR_REG_ALREADY_EXISTS = 923,
 }
 
 impl ReplyCode {

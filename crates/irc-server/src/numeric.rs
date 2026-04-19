@@ -83,7 +83,12 @@ mod tests {
     use std::sync::Arc;
 
     fn state() -> ServerState {
-        ServerState::new(Arc::new(Config::builder().build().unwrap()))
+        ServerState::new(
+            Arc::new(Config::builder().build().unwrap()),
+            Arc::new(crate::store::AnyStore::InMemory(
+                crate::store::InMemoryStore::new(),
+            )),
+        )
     }
 
     #[test]

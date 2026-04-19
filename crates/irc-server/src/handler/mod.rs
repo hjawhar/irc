@@ -8,11 +8,13 @@ use tracing::{debug, warn};
 use crate::numeric::Target;
 use crate::state::{ServerState, User};
 
+pub mod account;
 pub mod channel;
 pub mod keepalive;
 pub mod messaging;
 pub mod mode;
 pub mod registration;
+pub mod sasl;
 
 /// Outcome of a command dispatch. Returned by handlers so the
 /// connection driver can decide whether to keep reading.
@@ -29,7 +31,7 @@ pub enum Outcome {
 /// [`Command`] and hand it to the right handler.
 pub async fn dispatch(state: &Arc<ServerState>, user: &Arc<User>, msg: Message) -> Outcome {
     match Command::parse(&msg) {
-        Ok(cmd) => dispatch_typed(state, user, cmd),
+        Ok(cmd) => dispatch_typed(state, user, cmd).await,
         Err(CommandError::MissingParam { command, .. }) => {
             debug!(command, "missing param");
             send_need_more_params(state, user, command);
@@ -38,7 +40,7 @@ pub async fn dispatch(state: &Arc<ServerState>, user: &Arc<User>, msg: Message) 
     }
 }
 
-fn dispatch_typed(state: &Arc<ServerState>, user: &Arc<User>, cmd: Command) -> Outcome {
+async fn dispatch_typed(state: &Arc<ServerState>, user: &Arc<User>, cmd: Command) -> Outcome {
     match cmd {
         Command::Cap { subcommand, args } => {
             registration::handle_cap(state, user, &subcommand, &args)
@@ -62,6 +64,27 @@ fn dispatch_typed(state: &Arc<ServerState>, user: &Arc<User>, cmd: Command) -> O
             messaging::handle_privmsg(state, user, targets, &text)
         }
         Command::Notice { targets, text } => messaging::handle_notice(state, user, targets, &text),
+        Command::Authenticate { payload } => sasl::handle_authenticate(state, user, payload).await,
+        Command::Unknown {
+            ref verb,
+            ref params,
+        } if verb.as_ref() == b"REGISTER" => {
+            if params.len() < 3 {
+                send_need_more_params(state, user, "REGISTER");
+                return Outcome::Continue;
+            }
+            account::handle_register(state, user, &params[0], &params[1], &params[2]).await
+        }
+        Command::Unknown {
+            ref verb,
+            ref params,
+        } if verb.as_ref() == b"VERIFY" => {
+            if params.len() < 2 {
+                send_need_more_params(state, user, "VERIFY");
+                return Outcome::Continue;
+            }
+            account::handle_verify(state, user, &params[0], &params[1]).await
+        }
         Command::Unknown { verb, .. } => {
             warn!(verb = ?verb, "unknown command");
             send_unknown_command(state, user, &verb);

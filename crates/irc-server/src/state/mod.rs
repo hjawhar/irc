@@ -11,7 +11,9 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use irc_proto::Casemap;
 
+use crate::cloak::CloakEngine;
 use crate::config::Config;
+use crate::store::AnyStore;
 
 pub mod channel;
 pub mod user;
@@ -34,6 +36,8 @@ pub enum StateError {
 #[derive(Debug)]
 pub struct ServerState {
     config: Arc<Config>,
+    cloak: CloakEngine,
+    store: Arc<AnyStore>,
     users: DashMap<UserId, Arc<User>>,
     /// Casemap-folded nickname → owning [`UserId`].
     nicks: DashMap<Bytes, UserId>,
@@ -46,9 +50,21 @@ pub struct ServerState {
 impl ServerState {
     /// Construct a fresh state snapshot from a validated [`Config`].
     #[must_use]
-    pub fn new(config: Arc<Config>) -> Self {
+    pub fn new(config: Arc<Config>, store: Arc<AnyStore>) -> Self {
+        let cloak_secret = config.cloak_secret.as_deref().map_or_else(
+            || {
+                use rand::Rng;
+                tracing::warn!("no cloak_secret configured; generating a random one");
+                let mut buf = [0u8; 32];
+                rand::rng().fill(&mut buf);
+                buf.to_vec()
+            },
+            |s| s.as_bytes().to_vec(),
+        );
         Self {
             config,
+            cloak: CloakEngine::new(&cloak_secret),
+            store,
             users: DashMap::new(),
             nicks: DashMap::new(),
             channels: DashMap::new(),
@@ -63,6 +79,17 @@ impl ServerState {
         &self.config
     }
 
+    /// Access the cloaking engine.
+    #[must_use]
+    pub fn cloak(&self) -> &CloakEngine {
+        &self.cloak
+    }
+
+    /// Access the backing store.
+    #[must_use]
+    pub fn store(&self) -> &AnyStore {
+        &self.store
+    }
     /// Active casemap for nickname and channel comparisons.
     #[must_use]
     pub const fn casemap(&self) -> Casemap {
@@ -251,7 +278,12 @@ mod tests {
     }
 
     fn mk_state() -> ServerState {
-        ServerState::new(Arc::new(Config::builder().build().unwrap()))
+        ServerState::new(
+            Arc::new(Config::builder().build().unwrap()),
+            Arc::new(crate::store::AnyStore::InMemory(
+                crate::store::InMemoryStore::new(),
+            )),
+        )
     }
 
     #[test]

@@ -8,6 +8,8 @@
 
 #![deny(missing_docs)]
 
+pub mod account;
+pub mod cloak;
 pub mod config;
 pub mod connection;
 pub mod error;
@@ -18,6 +20,7 @@ pub mod numeric;
 pub mod proxy_proto;
 pub mod runtime;
 pub mod state;
+pub mod store;
 pub mod tls;
 
 pub use config::{Config, Limits, ListenerConfig};

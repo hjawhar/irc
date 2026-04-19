@@ -62,6 +62,15 @@ pub struct UserInner {
     pub mode_i: bool,
     /// `+w` — wallops mode.
     pub mode_w: bool,
+    /// Cloaked host, set on registration. When present, replaces `host`
+    /// in all outgoing protocol messages.
+    pub cloaked_host: Option<Bytes>,
+    /// Logged-in account name, set after successful SASL or VERIFY.
+    pub account: Option<String>,
+    /// TLS client certificate fingerprint, if available.
+    pub cert_fingerprint: Option<String>,
+    /// Active SASL mechanism during authentication.
+    pub sasl_mechanism: Option<String>,
 }
 
 /// A connected user: identity + outbound write pipe.
@@ -159,6 +168,17 @@ impl User {
         self.inner.write().registered = true;
     }
 
+    /// Set the cloaked host that replaces the real host in outgoing
+    /// protocol messages.
+    pub fn set_cloaked_host(&self, host: Bytes) {
+        self.inner.write().cloaked_host = Some(host);
+    }
+
+    /// Set the logged-in account name.
+    pub fn set_account(&self, name: String) {
+        self.inner.write().account = Some(name);
+    }
+
     /// Obtain a write guard to the inner mutable fields.
     pub fn inner_write(&self) -> parking_lot::RwLockWriteGuard<'_, UserInner> {
         self.inner.write()
@@ -185,7 +205,10 @@ impl User {
             .reg
             .as_ref()
             .map_or_else(|| Bytes::from_static(b"*"), |r| r.user_name.clone());
-        let host = inner.host.clone();
+        let host = inner
+            .cloaked_host
+            .clone()
+            .unwrap_or_else(|| inner.host.clone());
         drop(inner);
         compose_prefix(&nick, &user, &host)
     }
@@ -200,7 +223,10 @@ impl User {
             .reg
             .as_ref()
             .map_or_else(|| Bytes::from_static(b"*"), |r| r.user_name.clone());
-        let host = inner.host.clone();
+        let host = inner
+            .cloaked_host
+            .clone()
+            .unwrap_or_else(|| inner.host.clone());
         drop(inner);
         compose_prefix(nick, &user, &host)
     }

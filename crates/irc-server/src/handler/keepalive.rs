@@ -49,7 +49,10 @@ mod tests {
     #[tokio::test]
     async fn ping_replies_pong_with_same_token() {
         let cfg = Arc::new(Config::builder().build().unwrap());
-        let state = Arc::new(ServerState::new(cfg));
+        let store = Arc::new(crate::store::AnyStore::InMemory(
+            crate::store::InMemoryStore::new(),
+        ));
+        let state = Arc::new(ServerState::new(cfg, store));
         let (tx, mut rx) = mpsc::channel(8);
         let user = Arc::new(User::new(
             state.next_user_id(),

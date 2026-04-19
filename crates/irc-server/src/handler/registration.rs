@@ -171,6 +171,10 @@ fn maybe_finalize(state: &Arc<ServerState>, user: &Arc<User>) {
         return;
     }
     let nick = snap.nick.expect("checked above");
+    // Apply IP-based cloak before welcome burst so the cloaked host
+    // is visible in every subsequent protocol message.
+    let cloaked = state.cloak().cloak_ip(&user.peer().ip());
+    user.set_cloaked_host(bytes::Bytes::from(cloaked));
     user.mark_registered();
     debug!(user = user.id().get(), ?nick, "registration complete");
     send_welcome_burst(state, user, nick.as_ref());

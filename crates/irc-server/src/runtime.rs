@@ -106,7 +106,10 @@ impl Server {
             )));
         }
         let (tx, rx) = watch::channel(false);
-        let state = Arc::new(ServerState::new(Arc::new(config)));
+        let store = Arc::new(crate::store::AnyStore::InMemory(
+            crate::store::InMemoryStore::new(),
+        ));
+        let state = Arc::new(ServerState::new(Arc::new(config), store));
         let limiter = Arc::new(ConnectionLimiter::new());
         let handle = ShutdownHandle(tx);
         Ok((
