@@ -1,8 +1,19 @@
-//! `irc-client-gui` desktop client entrypoint.
-//!
-//! Phase 0 ships only the binary stub. The iced frontend lands in Phase 9
-//! (see `PLAN.md` §7).
+mod app;
+mod theme;
+mod views;
 
-fn main() {
-    eprintln!("irc-client-gui: not yet implemented; see PLAN.md §7 / phase 9");
+use app::IrcApp;
+
+fn main() -> iced::Result {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
+    iced::application("IRC Client", IrcApp::update, IrcApp::view)
+        .subscription(IrcApp::subscription)
+        .theme(IrcApp::theme)
+        .run_with(IrcApp::new)
 }

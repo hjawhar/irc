@@ -10,6 +10,7 @@ pub mod client;
 pub mod command;
 pub mod event;
 pub mod network;
+pub mod scripting;
 pub mod state;
 
 pub use client::Client;
