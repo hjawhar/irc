@@ -63,47 +63,66 @@ impl ShutdownHandle {
     }
 }
 
+/// Try to build a TLS acceptor from a listener config.
+fn build_tls_acceptor(
+    lc: &crate::config::ListenerConfig,
+) -> Result<Option<TlsAcceptor>, ServerError> {
+    if !lc.tls {
+        return Ok(None);
+    }
+    // cert and key are validated present by Config::validate.
+    let (Some(cert), Some(key)) = (lc.cert.as_ref(), lc.key.as_ref()) else {
+        return Err(ServerError::Config(crate::error::ConfigError::Invalid(
+            format!("TLS listener on {} requires both cert and key", lc.bind),
+        )));
+    };
+    let tls_cfg = crate::tls::load_tls_config(cert, key)?;
+    Ok(Some(TlsAcceptor::from(tls_cfg)))
+}
+
+/// Bind every configured listener and return the set of bound sockets.
+async fn bind_listeners(config: &Config) -> Result<Vec<BoundListener>, ServerError> {
+    let mut listeners = Vec::with_capacity(config.listeners.len());
+    for lc in &config.listeners {
+        let tls_acceptor = build_tls_acceptor(lc)?;
+        let listener = TcpListener::bind(lc.bind)
+            .await
+            .map_err(|e| ServerError::Listener {
+                addr: lc.bind.to_string(),
+                source: e,
+            })?;
+        let addr = listener.local_addr().map_err(|e| ServerError::Listener {
+            addr: lc.bind.to_string(),
+            source: e,
+        })?;
+        let tls_label = if lc.tls { " (TLS)" } else { "" };
+        info!(%addr, "listener bound{tls_label}");
+        listeners.push(BoundListener {
+            addr,
+            listener,
+            proxy_protocol: lc.proxy_protocol,
+            tls_acceptor,
+        });
+    }
+    if listeners.is_empty() {
+        return Err(ServerError::Config(crate::error::ConfigError::Invalid(
+            "no usable listeners".into(),
+        )));
+    }
+    Ok(listeners)
+}
+
 impl Server {
     /// Bind every configured listener and return a ready-to-serve
     /// [`Server`] together with a [`ShutdownHandle`].
     pub async fn bind(config: Config) -> Result<(Self, ShutdownHandle), ServerError> {
-        let mut listeners = Vec::with_capacity(config.listeners.len());
-        for lc in &config.listeners {
-            let tls_acceptor = if lc.tls {
-                // cert and key are validated present by Config::validate.
-                let (Some(cert), Some(key)) = (lc.cert.as_ref(), lc.key.as_ref()) else {
-                    return Err(ServerError::Config(crate::error::ConfigError::Invalid(
-                        format!("TLS listener on {} requires both cert and key", lc.bind),
-                    )));
-                };
-                let tls_cfg = crate::tls::load_tls_config(cert, key)?;
-                Some(TlsAcceptor::from(tls_cfg))
+        let listeners = bind_listeners(&config).await?;
+        if config.metrics.enabled {
+            if let Err(e) = crate::metrics::install(config.metrics.bind) {
+                warn!(error = %e, "failed to install metrics recorder");
             } else {
-                None
-            };
-            let listener = TcpListener::bind(lc.bind)
-                .await
-                .map_err(|e| ServerError::Listener {
-                    addr: lc.bind.to_string(),
-                    source: e,
-                })?;
-            let addr = listener.local_addr().map_err(|e| ServerError::Listener {
-                addr: lc.bind.to_string(),
-                source: e,
-            })?;
-            let tls_label = if lc.tls { " (TLS)" } else { "" };
-            info!(%addr, "listener bound{tls_label}");
-            listeners.push(BoundListener {
-                addr,
-                listener,
-                proxy_protocol: lc.proxy_protocol,
-                tls_acceptor,
-            });
-        }
-        if listeners.is_empty() {
-            return Err(ServerError::Config(crate::error::ConfigError::Invalid(
-                "no usable listeners".into(),
-            )));
+                info!(bind = %config.metrics.bind, "metrics exporter started");
+            }
         }
         let (tx, rx) = watch::channel(false);
         let store = Arc::new(crate::store::AnyStore::InMemory(

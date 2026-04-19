@@ -5,3 +5,8 @@
 # server_name   = "irc.example.net"
 # network_name  = "ExampleNet"
 # motd_path     = "/etc/irc-server/motd.txt"
+
+
+[metrics]
+enabled = true
+bind = "0.0.0.0:9772"

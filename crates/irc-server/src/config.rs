@@ -50,6 +50,9 @@ pub struct Config {
     /// Oper class definitions.
     #[serde(default, rename = "oper_class")]
     pub oper_classes: HashMap<String, OperClass>,
+    /// Prometheus metrics configuration.
+    #[serde(default)]
+    pub metrics: MetricsConfig,
 }
 
 /// Storage configuration.
@@ -59,6 +62,27 @@ pub struct StorageConfig {
     /// Path to the SQLite database file. When absent, an in-memory
     /// store is used.
     pub sqlite_path: Option<String>,
+}
+
+/// Prometheus metrics exporter configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsConfig {
+    /// Socket address the metrics HTTP exporter binds to.
+    #[serde(default = "default_metrics_bind")]
+    pub bind: SocketAddr,
+    /// Whether the metrics exporter is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            bind: default_metrics_bind(),
+            enabled: false,
+        }
+    }
 }
 
 /// Listener configuration.
@@ -149,6 +173,12 @@ const fn default_messages_burst() -> u32 {
 }
 const fn default_global_max() -> u32 {
     10_000
+}
+
+fn default_metrics_bind() -> SocketAddr {
+    "127.0.0.1:9772"
+        .parse()
+        .expect("valid default metrics addr")
 }
 
 impl Config {
@@ -249,6 +279,7 @@ impl Default for ConfigBuilder {
                 storage: StorageConfig::default(),
                 opers: Vec::new(),
                 oper_classes: HashMap::new(),
+                metrics: MetricsConfig::default(),
             },
         }
     }

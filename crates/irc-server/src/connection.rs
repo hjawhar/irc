@@ -96,8 +96,10 @@ pub async fn handle_connection(
     let span = info_span!("conn", user = user_id.get(), %peer);
     async move {
         info!("accepted");
+        crate::metrics::record_connection_open();
         run(state.clone(), stream, user_id, peer).await;
         cleanup(&state, user_id);
+        crate::metrics::record_connection_close();
         info!("closed");
     }
     .instrument(span)
@@ -211,20 +213,14 @@ async fn process_message(
 ) -> bool {
     debug!(verb = ?message.verb, params = message.params.len(), "recv");
     if registered && !bucket.try_consume() {
-        warn!("flood detected, disconnecting");
-        let error_msg = Message {
-            tags: Tags::new(),
-            prefix: None,
-            verb: Verb::word(Bytes::from_static(b"ERROR")),
-            params: {
-                let mut p = Params::new();
-                p.push_trailing(Bytes::from_static(b"Flooding"));
-                p
-            },
-        };
-        user.send(error_msg);
+        disconnect_flooding(user);
         return false;
     }
+    let cmd_label = match &message.verb {
+        irc_proto::Verb::Word(w) => std::str::from_utf8(w).unwrap_or("UNKNOWN").to_owned(),
+        irc_proto::Verb::Numeric(n) => format!("{n:03}"),
+    };
+    crate::metrics::record_message(&cmd_label);
     match dispatch(state, user, message).await {
         Outcome::Continue => true,
         Outcome::Disconnect => {
@@ -232,6 +228,23 @@ async fn process_message(
             false
         }
     }
+}
+
+/// Send a flood-detected ERROR and record the metric.
+fn disconnect_flooding(user: &Arc<User>) {
+    warn!("flood detected, disconnecting");
+    crate::metrics::record_flood_kick();
+    let error_msg = Message {
+        tags: Tags::new(),
+        prefix: None,
+        verb: Verb::word(Bytes::from_static(b"ERROR")),
+        params: {
+            let mut p = Params::new();
+            p.push_trailing(Bytes::from_static(b"Flooding"));
+            p
+        },
+    };
+    user.send(error_msg);
 }
 
 async fn write_loop(write_half: tokio::io::WriteHalf<MaybeTls>, mut rx: mpsc::Receiver<Message>) {
