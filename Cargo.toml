@@ -15,7 +15,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/owner/irc"
+repository = "https://github.com/hjawhar/irc"
 authors = ["IRC Suite contributors"]
 
 # Workspace-wide lints. Individual crates inherit via `[lints] workspace = true`.

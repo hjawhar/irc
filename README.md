@@ -1,22 +1,19 @@
 # IRC Suite
 
-A modern, modular IRC stack in Rust: a standards-compliant server, a mIRC-style GUI client, and a 24/7 bouncer — all built from a shared protocol crate.
-
-> **Status**: Pre-release. In planning / early implementation. See [`PLAN.md`](PLAN.md) for the full scope, phases, and exit criteria.
+A modern, modular IRC stack written entirely in Rust: a standards-compliant **server**, an **mIRC-style GUI client**, and a 24/7 **bouncer** — all built from a shared protocol crate.
 
 ## What's in the box
 
 | Component | Crate | What it does |
 |---|---|---|
-| **Server** | `irc-server` | Single-node IRC daemon. RFC 1459/2812 + IRCv3 baseline (CAP 302, SASL, server-time, echo-message, batch, chathistory). Account registration with email verification, HMAC cloaks, class-based operators, layered flood control, DNSBL, PROXY protocol v2. SQLite-backed. |
-| **GUI client** | `irc-client-gui` | mIRC-style desktop client (iced). Treebar, MDI-ish window stack, nick list, context menus, themes, tab completion, Rhai scripting (aliases, event hooks, identifiers, dialogs). |
-| **Bouncer** | `irc-bnc` | Persistent 24/7 IRC connection per user/network. Replays missed traffic with IRCv3 `server-time`. Multi-user, multi-network, `*status` admin pseudo-user. |
-| **Client core** | `irc-client-core` | Reusable library underneath the GUI and bouncer. |
-| **CLI client** | `irc-cli` | Headless TUI (ratatui) for smoke tests and ops. |
-| **Protocol** | `irc-proto` | Parser, serializer, codec, numerics, modes, CTCP, color codes. Hand-written, zero-copy, fuzzed. |
-| **Test kit** | `irc-testkit` | In-process servers, scripted clients, SMTP sink, clock override, scenario DSL. |
+| **Server** | `irc-server` | Single-node IRC daemon. RFC 1459/2812 + IRCv3 (CAP 302, SASL PLAIN/EXTERNAL, server-time, echo-message, account-notify, MONITOR). Account registration (REGISTER/VERIFY), HMAC cloaks, class-based operators, KLINE/KILL, flood control, connection limiter, TLS (rustls), PROXY protocol v2, Prometheus metrics, SQLite storage. |
+| **GUI Client** | `irc-client-gui` | mIRC-style desktop client built on iced. Connect dialog, multi-server treebar, per-server status windows, channel/query windows, nick list, light/dark theme toggle, `/help` command with guidelines, desktop notifications, DCC, Rhai scripting. |
+| **Bouncer** | `irc-bnc` | Persistent 24/7 upstream connections. Replays missed traffic with IRCv3 `server-time` tags. Multi-user, multi-network, per-target message buffering, `*status` admin pseudo-user. |
+| **Client Core** | `irc-client-core` | Headless client library shared by the GUI and bouncer. Multi-network connection manager, state tracking, Rhai scripting engine. |
+| **Protocol** | `irc-proto` | Wire parser/serializer (zero-copy, fuzzed), typed Command enum, ReplyCode numerics, casemap, newtypes, tokio codec, CAP/ISUPPORT, modes, CTCP, DCC, mIRC color codes. |
+| **Test Kit** | `irc-testkit` | Test infrastructure: Clock, Store, SMTP sink, DNSBL resolver traits with in-memory implementations. |
 
-## Architecture at a glance
+## Architecture
 
 ```
 ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
@@ -33,217 +30,131 @@ A modern, modular IRC stack in Rust: a standards-compliant server, a mIRC-style 
 
 ## Requirements
 
-- **Rust** 1.80+ (pinned via `rust-toolchain.toml`)
+- **Rust** 1.85+ (pinned to 1.90 via `rust-toolchain.toml`)
 - **Docker** 24+ and **Docker Compose v2** (optional; for the reference stack)
-- **Linux/macOS** for server + bouncer; **Linux/macOS/Windows** for the GUI client
-- For the GUI: a working display server (X11/Wayland on Linux, native on macOS/Windows)
+- **Linux/macOS/Windows** for the GUI client; **Linux/macOS** for server and bouncer
 
-## Quick start — Docker (recommended)
+## Quick start
 
-Bring up the full reference stack (server + bouncer + Prometheus + Grafana + MailHog):
+### Native (development)
 
 ```bash
-git clone https://github.com/<owner>/irc.git
+# 1. Clone and build
+git clone https://github.com/hjawhar/irc.git
 cd irc
-cp -r ops/compose/examples/server-config ops/compose/server-config
-cp -r ops/compose/examples/bnc-config    ops/compose/bnc-config
+cargo build --workspace
+
+# 2. Start the server
+cargo run -p irc-server -- --config examples/server-config.toml
+
+# 3. In another terminal, launch the GUI client
+cargo run -p irc-client-gui
+```
+
+The GUI opens with a **Connect dialog** pre-filled with `127.0.0.1:6667`. Click **Connect**, and you'll see the welcome burst in the Status window. Type `/join #test` to open a channel, `/help` for all commands.
+
+### With the bouncer
+
+```bash
+# Terminal 3: start the bouncer
+cargo run -p irc-bnc -- --config examples/bnc-config.toml
+```
+
+Connect your IRC client to `localhost:6668` and authenticate with `PASS alice/localnet:hunter2`.
+
+### Docker Compose (full stack)
+
+```bash
 docker compose -f ops/compose/docker-compose.yml up --build
 ```
 
-You now have:
+| Service | Address |
+|---|---|
+| IRC server | `localhost:6667` |
+| Bouncer | `localhost:6668` |
+| Prometheus | `http://localhost:9090` |
+| Grafana | `http://localhost:3000` (admin/admin) |
+| MailHog | `http://localhost:8025` |
 
-| Service      | URL / address                              |
-|--------------|--------------------------------------------|
-| IRC server   | `localhost:6667` (plain), `:6697` (TLS)    |
-| Bouncer      | `localhost:6668` (plain), `:6699` (TLS)    |
-| Server metrics | `http://localhost:9772/metrics`          |
-| Bouncer metrics | `http://localhost:9773/metrics`         |
-| Prometheus   | `http://localhost:9090`                    |
-| Grafana      | `http://localhost:3000` (admin/admin)      |
-| MailHog      | `http://localhost:8025` (verification inbox) |
+## GUI Client Features
 
-Connect with any IRC client and register an account:
+- **Connect dialog** — host, port, nick, username, realname, TLS toggle
+- **Multi-server** — connect to multiple servers simultaneously
+- **Treebar** — server nodes with `●`/`○` status, channels and queries nested underneath
+- **Status window** — per-server, shows numerics, MOTD, errors
+- **Light/Dark theme** — toggle via the status bar button or `/theme` command
+- **Commands** — `/join`, `/part`, `/nick`, `/msg`, `/topic`, `/list`, `/connect`, `/quit`, `/raw`, `/theme`, `/help`
+- **Welcome guidelines** — shown when you join a channel
+- **Desktop notifications** — PMs and nick highlights via `notify-rust`
+- **Channel list browser** — `/list` opens a filterable grid with click-to-join
+- **Rhai scripting** — aliases, event hooks, custom identifiers
 
-```
-/server localhost 6697
-/nick alice
-/join #general
-/register alice you@example.com hunter2hunter2
-# fetch the token from MailHog at http://localhost:8025
-/verify alice <token>
-```
+## Server Features
 
-Stop the stack with `docker compose -f ops/compose/docker-compose.yml down` (add `-v` to wipe volumes).
-
-## Quick start — native
-
-Build every binary in the workspace:
-
-```bash
-cargo build --release --workspace
-```
-
-Start the server:
-
-```bash
-cp examples/server-config.toml ./config.toml
-./target/release/irc-server --config ./config.toml
-```
-
-Start the bouncer (optional, in another terminal):
-
-```bash
-cp examples/bnc-config.toml ./bnc.toml
-./target/release/irc-bnc --config ./bnc.toml
-```
-
-Launch the GUI client:
-
-```bash
-cargo run --release --bin irc-client-gui
-```
-
-## Installation (end users, post-1.0)
-
-Coming with release 0.1:
-
-- **Prebuilt binaries** on the GitHub Releases page (Linux, macOS, Windows).
-- **OCI images**: `ghcr.io/<owner>/irc-server:<tag>`, `ghcr.io/<owner>/irc-bnc:<tag>`, `ghcr.io/<owner>/irc-cli:<tag>` (multi-arch, cosign-signed, SBOM attached).
-- **Cargo**: `cargo install irc-server irc-bnc irc-client-gui`.
-- **Homebrew / Flatpak / MSI**: planned.
+- **RFC 1459/2812** compliant with **IRCv3** extensions
+- **CAP 302** negotiation: `server-time`, `echo-message`, `account-notify`, `away-notify`, `extended-join`, `message-tags`, `multi-prefix`, `sasl`, `cap-notify`
+- **SASL** PLAIN + EXTERNAL authentication
+- **Account registration** — `REGISTER`/`VERIFY` commands with argon2id password hashing
+- **HMAC-SHA256 cloaks** — IP masking for all users; account-based cloaks for registered users
+- **Operators** — config-driven `[[oper]]` blocks with argon2 passwords, SASL account binding, hostmask restriction, class-based privileges
+- **KLINE/UNKLINE** — persistent bans with glob matching and expiry
+- **KILL** — disconnect users with audit logging
+- **MONITOR** — online/offline notifications for watched nicks
+- **Channel modes** — `+n`, `+t`, `+m`, `+i`, `+k`, `+l`, `+o`, `+v`
+- **Flood control** — token-bucket rate limiter per connection
+- **Connection limiter** — per-IP concurrent connection cap
+- **Registration deadline** — drops slow-loris connections
+- **TLS** — via `tokio-rustls` with `rustls` (ring backend)
+- **PROXY protocol v2** — for HAProxy/nginx fronting
+- **Prometheus metrics** — connections, messages, auth, flood kicks, klines
+- **SQLite storage** — accounts, klines via `sqlx`
 
 ## Configuration
 
-Configs are TOML. Full reference in [`docs/ops-and-admins.md`](docs/ops-and-admins.md).
-
-Minimal server config (`examples/server-config.toml`):
-
-```toml
-server_name   = "irc.example.net"
-network_name  = "ExampleNet"
-motd_path     = "/etc/irc-server/motd.txt"
-# HMAC key for cloaks — generate once, keep secret, rotate with a migration
-cloak_secret_file = "/var/lib/irc-server/cloak.secret"
-
-[[listener]]
-bind = "0.0.0.0:6667"
-tls  = false
-
-[[listener]]
-bind = "0.0.0.0:6697"
-tls  = true
-cert = "/etc/irc-server/tls/fullchain.pem"
-key  = "/etc/irc-server/tls/privkey.pem"
-
-[metrics]
-bind = "127.0.0.1:9772"
-
-[storage]
-sqlite_path = "/var/lib/irc-server/state.db"
-
-[smtp]
-host           = "mail.example.com"
-port           = 587
-username       = "irc-server"
-password_file  = "/etc/irc-server/smtp.password"
-from           = "IRC <noreply@example.net>"
-
-[limits]
-per_ip_max_connections         = 5
-per_ip_connect_rate_per_minute = 3
-registration_deadline_seconds  = 10
-messages_per_second            = 2
-messages_burst                 = 6
-
-[[oper]]
-name            = "alice"
-password_hash   = "$argon2id$v=19$..."
-require_account = "alice"
-allowed_hosts   = ["*!*@192.0.2.0/24"]
-class           = "netadmin"
-
-[oper_class.netadmin]
-privileges = ["kline", "kill", "samode", "rehash", "see-realhost", "lockdown"]
-```
-
-Starter configs live in `examples/` and are the same files the compose stack seeds from.
+Configs are TOML. See the annotated examples:
+- [`examples/server-config.toml`](examples/server-config.toml) — server
+- [`examples/bnc-config.toml`](examples/bnc-config.toml) — bouncer
 
 ## Development
 
-First-time setup:
-
 ```bash
-rustup show                               # picks up pinned toolchain
-cargo install cargo-nextest cargo-deny cargo-llvm-cov sqlx-cli cargo-chef
-```
+rustup show                                          # picks up pinned toolchain
+cargo install cargo-nextest cargo-deny
 
-Daily loop:
-
-```bash
 cargo fmt
 cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace             # unit + property + conformance + integration
-cargo deny check                          # licenses, advisories, duplicate majors
+cargo test --workspace --all-targets
+cargo deny check
 ```
 
-Focused tests:
-
+Fuzz the protocol parser (requires nightly):
 ```bash
-cargo nextest run -p irc-proto
-cargo nextest run -p irc-server -- registration_happy_path
+cd crates/irc-proto/fuzz
+cargo +nightly fuzz run decoder -- -max_total_time=60
 ```
 
-Fuzzing the protocol parser:
+## Project structure
 
-```bash
-cargo fuzz run decoder -- -max_total_time=60
 ```
-
-Database schema changes:
-
-```bash
-cd crates/irc-server
-sqlx migrate add <description>
-cargo sqlx prepare                         # refresh .sqlx/ for offline builds
+irc/
+├── crates/
+│   ├── irc-proto/          # Protocol: parser, codec, types, fuzz harness
+│   ├── irc-server/         # Server daemon
+│   ├── irc-client-core/    # Headless client library
+│   ├── irc-client-gui/     # iced GUI client
+│   ├── irc-bnc/            # Bouncer
+│   ├── irc-cli/            # TUI client (stub)
+│   └── irc-testkit/        # Test infrastructure
+├── ops/
+│   ├── docker/             # Per-binary Dockerfiles
+│   ├── compose/            # docker-compose dev stack
+│   ├── prometheus/         # Scrape config
+│   └── grafana/            # Dashboard JSON
+├── examples/               # Reference TOML configs
+├── docs/                   # Topic documentation
+└── .github/workflows/      # CI (fmt, clippy, test, deny, fuzz, audit, release)
 ```
-
-More in [`docs/testing.md`](docs/testing.md) and [`AGENTS.md`](AGENTS.md).
-
-## Documentation map
-
-| File | Topic |
-|---|---|
-| [`PLAN.md`](PLAN.md) | Full plan, phases, exit criteria — source of truth |
-| [`AGENTS.md`](AGENTS.md) | Working-on-this-repo guide (humans + AI) |
-| [`CLAUDE.md`](CLAUDE.md) | Claude-specific notes (points at AGENTS.md) |
-| [`docs/architecture.md`](docs/architecture.md) | How the pieces fit |
-| [`docs/accounts-and-cloaks.md`](docs/accounts-and-cloaks.md) | Registration, verification, cloak engine |
-| [`docs/ops-and-admins.md`](docs/ops-and-admins.md) | Server ops, oper blocks, config reference |
-| [`docs/security-and-abuse.md`](docs/security-and-abuse.md) | Anti-flood, DDoS posture, bans |
-| [`docs/metrics.md`](docs/metrics.md) | Prometheus metrics, Grafana dashboards |
-| [`docs/scripting.md`](docs/scripting.md) | Rhai API for the client |
-| [`docs/testing.md`](docs/testing.md) | Testkit, scenarios, running tests |
-| [`docs/protocol-notes.md`](docs/protocol-notes.md) | RFC quirks, casemapping, IRCv3 interop |
-| [`docs/bnc-admin.md`](docs/bnc-admin.md) | Bouncer management |
-
-## Roadmap
-
-Tracked in [`PLAN.md` §13](PLAN.md#13-phased-delivery). Summary:
-
-- **Phase 0–1** — workspace + `irc-proto`
-- **Phase 2–6** — server (MVP → accounts → opers → IRCv3 → anti-abuse)
-- **Phase 7** — observability + Docker
-- **Phase 8–9** — client (core → GUI)
-- **Phase 10** — Rhai scripting
-- **Phase 11** — bouncer
-- **Phase 12** — DCC + polish
-- **Phase 13** — hardening, security review, release 0.1
-- **Phase 14 (opt)** — TS6 server-to-server federation
 
 ## License
 
 MIT. See [`LICENSE-MIT`](LICENSE-MIT).
-
-## Contributing
-
-Pre-release; external contributions not accepted yet. Design feedback welcome on the issue tracker.

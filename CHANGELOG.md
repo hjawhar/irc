@@ -5,116 +5,97 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2026-04-19
+## [0.1.0] - 2026-04-20
 
-Initial release of the IRC Suite: a server, bouncer, and CLI client built in Rust.
+Initial release of the IRC Suite.
 
 ### Added
 
 #### Protocol (`irc-proto`)
 - RFC 1459 / RFC 2812 wire-format parser and serializer (zero-copy, `bytes`-backed).
-- Typed `Message`, `Command` enum, `ReplyCode` numerics, `Prefix` variants.
+- Typed `Message`, `Command` enum (17 variants), `ReplyCode` (~60 named numerics).
 - IRCv3 message-tags with escape handling.
-- Channel and user mode parser with parameterized mode support.
-- CTCP encode/decode.
-- mIRC formatting codes (color, bold, italic, underline, strikethrough, monospace, reverse, reset) with `StyledSpan` output.
-- Casemapping-aware newtypes: `Nick`, `ChannelName`, `ServerName`, `AccountName` (`ascii`, `rfc1459`, `rfc1459-strict`).
-- `tokio-util` codec with 512-byte untagged / 8191-byte tagged limits, lenient `\n` decode.
-- CAP 302 primitives and ISUPPORT parser.
-- Property tests (`proptest`) for parse/serialize roundtrip.
-- Fuzz targets (`cargo-fuzz`): decoder, casemap, codec.
+- Channel and user mode parser with ISUPPORT-aware `ModeSpec`.
+- CTCP encode/decode with `ACTION` helper.
+- DCC protocol types (CHAT, SEND) with IP encoding.
+- mIRC formatting codes with `StyledSpan` output.
+- Casemapping newtypes: `Nick`, `ChannelName`, `ServerName`, `AccountName`.
+- Tokio codec with line-length limits and lenient `\n` decode.
+- CAP 302 primitives and ISUPPORT parser with typed accessors.
+- `proptest` roundtrip tests (512 cases) + panic-resistance test.
+- `cargo-fuzz` targets: decoder, casemap, codec with seed corpus.
 
 #### Server (`irc-server`)
 - Tokio multi-threaded async runtime with per-connection tasks.
-- TLS via `tokio-rustls` (no OpenSSL dependency).
-- PROXY protocol v2 support (per-listener opt-in).
-- Full command set: registration (`CAP`, `NICK`, `USER`, `PASS`, `AUTHENTICATE`, `QUIT`, `PING`/`PONG`), channels (`JOIN`, `PART`, `TOPIC`, `KICK`, `INVITE`, `NAMES`, `LIST`, `WHO`, `WHOIS`, `WHOWAS`, `MODE`), messaging (`PRIVMSG`, `NOTICE`, `TAGMSG`), info (`MOTD`, `VERSION`, `ADMIN`, `TIME`, `LUSERS`, `STATS`).
-- User modes: `+i`, `+w`, `+o`, `+s`, `+Z`, `+x`, `+R`.
-- Channel modes: `+o`, `+v`, `+b`, `+e`, `+I`, `+i`, `+k`, `+l`, `+m`, `+n`, `+s`, `+t`, `+p`, `+r`, `+M`.
-- SQLite storage (`sqlx`, WAL mode) behind a `Store` trait.
-- Account registration and verification (`REGISTER`/`VERIFY`) with SMTP email (`lettre`).
-- Nick protection modes: off, warn, rename, ghost.
-- SASL PLAIN (argon2id) and EXTERNAL (TLS client-cert fingerprint).
-- HMAC-SHA256 IP cloaking (always-on by default); `user/<account>` cloaks for registered users; vanity cloaks via `SETCLOAK`.
-- Oper system: config-driven blocks, argon2 password hashing, SASL-account-bound, hostmask-restricted, class-based privileges.
-- Oper commands: `OPER`, `KILL`, `KLINE`/`UNKLINE`, `GLINE`/`UNGLINE`, `LOCKDOWN`, `SAMODE`, `REHASH`, `DIE`, `RESTART`, `SHOWHOST`.
-- Audit logging: every oper action emits structured `tracing` spans with oper identity, target, and reason.
-- IRCv3: CAP 302, message-tags, server-time, echo-message, away-notify, account-notify, batch, chathistory (`LATEST`/`BEFORE`/`AFTER`/`AROUND`/`BETWEEN`), MONITOR.
-- Anti-abuse: per-IP connection limits (/24 IPv4, /64 IPv6 aggregation), per-IP rate limiting, global connection cap, registration deadline, per-connection token buckets (messages/sec, bytes/sec, targets/sec), penalty escalation, DNSBL integration, lockdown mode.
-- Chathistory: per-channel ring buffer with optional SQLite persistence.
-- Hot-reload via `REHASH` (config reload without dropping clients).
-- Event bus for future TS6 server-to-server linking.
-- Prometheus metrics endpoint (`/metrics`): connections, messages, bytes, auth outcomes, flood kicks, DNSBL hits, klines, oper actions, chathistory queries, store latency.
-- Health endpoint (`GET /health`) for container orchestration.
-
-#### Bouncer (`irc-bnc`)
-- Persistent upstream connections via `irc-client-core`.
-- Multi-user, multi-network architecture.
-- Downstream protocol: SASL PLAIN or `PASS user/net:password` auth.
-- Synthetic welcome, JOIN/TOPIC/NAMES replay on attach.
-- Buffered message replay with original `@time=` server-time tags.
-- Ring buffer per target (configurable depth) with optional SQLite persistence.
-- Admin interface via `*status` pseudo-user: `addnetwork`, `delnetwork`, `connect`, `disconnect`, `listnets`, `status`, `setnick`, `setsasl`, `adduser`, `passwd`, `metrics`.
-- CLI admin tool: `irc-bnc admin users create|delete|listnets|passwd`.
-- Prometheus metrics: upstream/downstream gauges, buffer depth, replay bytes, reconnect counters.
-- Health endpoint.
-
-#### Client Core (`irc-client-core`)
-- Headless client library consumed by GUI and bouncer.
-- Multi-network connection manager with exponential-backoff reconnection.
-- Full IRCv3 capability negotiation (cap-notify, account-notify, away-notify, extended-join, server-time, message-tags, echo-message, batch, chathistory, sasl, multi-prefix, userhost-in-names, invite-notify, setname).
-- Per-window scrollback ring buffers.
-- Per-window log files with daily rotation.
-- SASL PLAIN and EXTERNAL support.
-- Account registration client flow (`REGISTER`/`VERIFY`).
+- TLS via `tokio-rustls` (rustls ring backend).
+- PROXY protocol v2 support (AF_INET + AF_INET6 TCP).
+- Registration state machine: CAP, NICK, USER, PASS with welcome burst (001-005, LUSERS, MOTD).
+- Channel operations: JOIN (auto-op first joiner), PART, TOPIC, NAMES.
+- Messaging: PRIVMSG, NOTICE to channels and users.
+- Channel modes: `+n`, `+t`, `+m`, `+i`, `+k`, `+l`, `+o`, `+v` with op enforcement.
+- User modes: `+i`, `+w`.
+- PING/PONG keepalive, QUIT with broadcast to channel peers.
+- SQLite storage (`sqlx`) behind a `Store` trait with `InMemoryStore` for tests.
+- Account registration (`REGISTER`/`VERIFY`) with argon2id password hashing.
+- SASL PLAIN and EXTERNAL authentication.
+- HMAC-SHA256 IP cloaking; `user/<account>` cloaks for registered users.
+- Operator system: config-driven blocks, argon2 passwords, SASL-account binding, hostmask restriction, class-based privileges.
+- Operator commands: `OPER`, `KILL`, `KLINE`/`UNKLINE`, `SHOWHOST`.
+- Audit logging via `tracing` on the `audit` target.
+- IRCv3 CAP 302 with 9 caps: server-time, echo-message, account-notify, away-notify, extended-join, message-tags, multi-prefix, sasl, cap-notify.
+- MONITOR command (online/offline notifications, 100-entry limit).
+- Per-IP connection limiter with CAS-based acquire/release.
+- Registration deadline (configurable timeout for slow-loris protection).
+- Token-bucket per-connection flood control with configurable rate/burst.
+- TOML configuration with validation, builder pattern for tests.
+- Prometheus metrics: connections, messages, auth, flood kicks, klines.
+- Event bus (broadcast channel) for future TS6 server-to-server linking.
 
 #### Client GUI (`irc-client-gui`)
-- mIRC-style layout: treebar, window stack, nick list, topic bar, input line, status bar.
-- Tab completion (nicks, channels, commands).
-- mIRC formatting code rendering and input (Ctrl+K/B/U/I/R).
-- TOML themes (classic mIRC + modern dark shipped).
-- Channel browser (`/list` with sortable grid).
-- Registration wizard UI.
-- SASL credential manager (keychain-backed where available).
-- Desktop notifications for highlights, PMs, watched-nick joins.
-- Keyboard shortcuts: Ctrl+Tab/Shift+Tab, Ctrl+W, Ctrl+F, Alt+number, F1, F2.
+- mIRC-style layout: treebar, scrollback, nick list, topic bar, input bar, status bar.
+- Connect dialog with host, port, nick, username, realname, TLS toggle.
+- Multi-server support: connect to multiple servers simultaneously.
+- Per-server status windows showing numerics, MOTD, errors.
+- Light/dark theme toggle via status bar button or `/theme` command.
+- Commands: `/connect`, `/server`, `/join`, `/part`, `/nick`, `/msg`, `/topic`, `/list`, `/quit`, `/raw`, `/theme`, `/help`.
+- `/help` command showing all available commands and community guidelines.
+- Welcome message shown when joining a channel.
+- Desktop notifications for PMs and nick highlights (`notify-rust`).
+- Channel list browser with filtering and click-to-join.
+- Client-side message echo in scrollback.
+- PM routing: messages to your nick open query windows.
 
-#### CLI Client (`irc-cli`)
-- Ratatui TUI built on `irc-client-core`.
+#### Client Core (`irc-client-core`)
+- Headless multi-network client library.
+- Connection manager with TCP and TLS support.
+- Auto-registration (NICK + USER) on connect, PING/PONG handling.
+- `NetworkState` tracking channels, nicks, topics from incoming messages.
+- `ClientEvent` (15 variants) / `ClientCommand` (12 variants) channel API.
+- Rhai scripting engine: sandboxed (100k ops limit), IRC helpers (send_msg, join, part, echo, nick, channel), alias registration, event hooks.
+- DCC manager: accept/offer chat and file transfers.
 
-#### Scripting (Rhai)
-- Script loading from `~/.config/irc-suite/scripts/*.rhai`.
-- Identifiers: `nick()`, `chan()`, `network()`, `now()`, `me()`, `topic()`, `version()`, `account()`.
-- Actions: `send_msg`, `send_raw`, `join`, `part`, `set_mode`, `open_window`, `echo`.
-- Event hooks with filters, aliases, timers (`after`/`every`).
-- Async dialog integration (`prompt`, `confirm`, `form`).
-- Instruction cap per event for runaway loop prevention.
+#### Bouncer (`irc-bnc`)
+- Persistent upstream connections with NICK/USER registration and PING/PONG.
+- Per-target message buffering (ring buffer, configurable depth).
+- Downstream auth via `PASS user/network:password`.
+- Synthetic welcome burst + JOIN replay on client attach.
+- Buffered message replay with `@time=` server-time tags.
+- `*status` admin pseudo-user: `listnetworks`, `status`, `help`.
+- CLI binary with `--config` flag and tracing.
 
 #### Test Kit (`irc-testkit`)
-- `TestServer` / `TestBnc` builders with ephemeral ports and shutdown guards.
-- `ScriptedClient` with fluent DSL for wire-level assertions.
-- `SmtpSink` for email verification testing.
-- `ClockOverride` for deterministic time-dependent tests.
-- `CaptureStore` for call recording and invariant checks.
-- Conformance, integration, and E2E test scenarios.
+- `Clock` trait with `SystemClock` and `ManualClock`.
+- `SmtpTransport` trait with `SmtpSink` for email testing.
+- `Store` trait with `InMemoryStore`.
+- `DnsblResolver` trait with `NoopDnsblResolver` and `StaticDnsblResolver`.
 
 #### Operations
-- Multi-stage Dockerfiles with `cargo-chef` caching and distroless runtime images.
-- Container hardening: non-root UID, read-only rootfs, `cap_drop: ALL`, `no-new-privileges`.
-- Docker Compose dev stack: server + bouncer + Prometheus + Grafana + MailHog.
-- Grafana dashboards: server overview, bouncer, protocol.
+- Multi-stage Dockerfiles with `cargo-chef` and distroless runtime.
+- Docker Compose dev stack: server + Prometheus + Grafana + MailHog.
+- Grafana server dashboard (4 panels).
 - Prometheus scrape configuration.
 - GitHub Actions CI: fmt, clippy, nextest, cargo-deny.
-- GitHub Actions release workflow: multi-arch binaries (x86_64-linux, aarch64-linux, aarch64-darwin), multi-arch Docker images (linux/amd64, linux/arm64) published to GHCR, GitHub Release with auto-generated notes.
+- GitHub Actions nightly fuzz and weekly security audit workflows.
+- GitHub Actions release workflow: cross-compile binaries, multi-arch Docker images to GHCR, GitHub Release.
 
-#### Documentation
-- `docs/architecture.md` — system design overview.
-- `docs/protocol-notes.md` — IRC protocol implementation notes.
-- `docs/scripting.md` — Rhai scripting guide.
-- `docs/accounts-and-cloaks.md` — account system and IP cloaking.
-- `docs/ops-and-admins.md` — operator guide and SQLite tuning.
-- `docs/security-and-abuse.md` — threat model and anti-abuse layers.
-- `docs/metrics.md` — Prometheus metrics reference.
-- `docs/testing.md` — test strategy and running tests.
-
-[0.1.0]: https://github.com/owner/irc/releases/tag/v0.1.0
+[0.1.0]: https://github.com/hjawhar/irc/releases/tag/v0.1.0
