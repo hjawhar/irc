@@ -1,5 +1,8 @@
 //! Events emitted by the client to the frontend.
 
+use std::net::Ipv4Addr;
+
+use crate::dcc::TransferId;
 use bytes::Bytes;
 
 /// Opaque identifier for a network connection.
@@ -115,5 +118,61 @@ pub enum ClientEvent {
         network: NetworkId,
         /// Description of the error.
         message: String,
+    },
+    /// A single entry from a LIST reply.
+    ListEntry {
+        /// Which network.
+        network: NetworkId,
+        /// Channel name.
+        channel: Bytes,
+        /// Number of visible users.
+        user_count: u32,
+        /// Channel topic (may be empty).
+        topic: Bytes,
+    },
+    /// End of LIST reply.
+    ListEnd {
+        /// Which network.
+        network: NetworkId,
+    },
+    /// A DCC CHAT request was received.
+    DccChatRequest {
+        /// Which network.
+        network: NetworkId,
+        /// Who sent the request.
+        from: Bytes,
+        /// Peer IP address.
+        ip: Ipv4Addr,
+        /// Peer TCP port.
+        port: u16,
+    },
+    /// A DCC SEND request was received.
+    DccSendRequest {
+        /// Which network.
+        network: NetworkId,
+        /// Who sent the request.
+        from: Bytes,
+        /// Offered filename.
+        filename: String,
+        /// Peer IP address.
+        ip: Ipv4Addr,
+        /// Peer TCP port.
+        port: u16,
+        /// File size in bytes.
+        size: u64,
+    },
+    /// Progress update for an ongoing DCC transfer.
+    DccProgress {
+        /// Transfer identifier.
+        transfer_id: TransferId,
+        /// Bytes transferred so far.
+        bytes_transferred: u64,
+        /// Total expected bytes.
+        total: u64,
+    },
+    /// A DCC transfer completed.
+    DccComplete {
+        /// Transfer identifier.
+        transfer_id: TransferId,
     },
 }

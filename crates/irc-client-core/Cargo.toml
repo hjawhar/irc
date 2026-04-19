@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 irc-proto = { path = "../irc-proto", version = "0.0.0" }
 bytes = "1"
-tokio = { version = "1", features = ["rt", "net", "sync", "time", "io-util", "macros"] }
+tokio = { version = "1", features = ["rt", "net", "sync", "time", "io-util", "macros", "fs"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tokio-rustls = "0.26"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

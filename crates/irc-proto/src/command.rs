@@ -140,6 +140,13 @@ pub enum Command {
         /// Mode arguments (nick/mask/key/limit).
         args: Vec<Bytes>,
     },
+    /// `LIST [<channels>] [<server>]`.
+    List {
+        /// Optional list of channels to query (empty = all).
+        channels: Vec<Bytes>,
+        /// Optional target server.
+        server: Option<Bytes>,
+    },
     /// Three-digit numeric reply (parsed `u16`, params preserved raw).
     Numeric {
         /// Three-digit reply code.
@@ -239,6 +246,7 @@ impl Command {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // exhaustive match over all Command variants
     fn to_verb_params(&self) -> (Verb, Params) {
         match self {
             Self::Cap { subcommand, args } => {
@@ -339,6 +347,16 @@ impl Command {
                 }
                 (Verb::word(Bytes::from_static(b"MODE")), p)
             }
+            Self::List { channels, server } => {
+                let mut p = Params::new();
+                if !channels.is_empty() {
+                    p.push(join_commas(channels));
+                }
+                if let Some(s) = server {
+                    p.push(s.clone());
+                }
+                (Verb::word(Bytes::from_static(b"LIST")), p)
+            }
             Self::Numeric { code, params } => (Verb::Numeric(*code), params.clone()),
             Self::Unknown { verb, params } => (Verb::Word(verb.clone()), params.clone()),
         }
@@ -383,6 +401,10 @@ fn parse_word(word: &Bytes, params: &Params) -> Result<Command, CommandError> {
         b"NOTICE" => parse_privmsg(params, true),
         b"TOPIC" => parse_topic(params),
         b"MODE" => parse_mode(params),
+        b"LIST" => Ok(Command::List {
+            channels: params.get(0).map(split_commas).unwrap_or_default(),
+            server: params.get(1).cloned(),
+        }),
         _ => Ok(Command::Unknown {
             verb: word.clone(),
             params: params.clone(),

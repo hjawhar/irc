@@ -124,6 +124,9 @@ fn command_network_id(cmd: &ClientCommand) -> &NetworkId {
         | ClientCommand::Part { network, .. }
         | ClientCommand::ChangeNick { network, .. }
         | ClientCommand::SetTopic { network, .. }
-        | ClientCommand::Quit { network, .. } => network,
+        | ClientCommand::Quit { network, .. }
+        | ClientCommand::List { network, .. }
+        | ClientCommand::DccAcceptChat { network, .. }
+        | ClientCommand::DccAcceptSend { network, .. } => network,
     }
 }

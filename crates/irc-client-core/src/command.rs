@@ -1,5 +1,8 @@
 //! Commands accepted from the frontend to the client.
 
+use std::net::Ipv4Addr;
+use std::path::PathBuf;
+
 use bytes::Bytes;
 
 use crate::event::NetworkId;
@@ -92,5 +95,38 @@ pub enum ClientCommand {
         network: NetworkId,
         /// Optional quit reason.
         reason: Option<Bytes>,
+    },
+    /// Request the channel list from the server.
+    List {
+        /// Target network.
+        network: NetworkId,
+    },
+    /// Accept a DCC CHAT request.
+    DccAcceptChat {
+        /// Target network.
+        network: NetworkId,
+        /// Nick of the peer.
+        nick: Bytes,
+        /// Peer IP address.
+        ip: Ipv4Addr,
+        /// Peer TCP port.
+        port: u16,
+    },
+    /// Accept a DCC SEND request.
+    DccAcceptSend {
+        /// Target network.
+        network: NetworkId,
+        /// Nick of the peer.
+        nick: Bytes,
+        /// Peer IP address.
+        ip: Ipv4Addr,
+        /// Peer TCP port.
+        port: u16,
+        /// Offered filename.
+        filename: String,
+        /// File size in bytes.
+        size: u64,
+        /// Local path to save the file.
+        save_path: PathBuf,
     },
 }

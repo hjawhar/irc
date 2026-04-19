@@ -1,4 +1,5 @@
 mod app;
+mod notifications;
 mod theme;
 mod views;
 

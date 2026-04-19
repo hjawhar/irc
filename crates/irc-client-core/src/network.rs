@@ -13,7 +13,7 @@ use tracing::{debug, error, warn};
 
 use irc_proto::command::Command;
 use irc_proto::prefix::Prefix;
-use irc_proto::{IrcCodec, Message};
+use irc_proto::{IrcCodec, Message, Params};
 
 use crate::command::ClientCommand;
 use crate::event::{ClientEvent, NetworkId};
@@ -353,6 +353,24 @@ fn translate_message(id: NetworkId, msg: &Message) -> Option<ClientEvent> {
                 nick: confirmed_nick,
             })
         }
+        // RPL_LIST: <client> <channel> <user_count> :<topic>
+        Command::Numeric { code: 322, params } => {
+            let channel = params.get(1).cloned().unwrap_or_default();
+            let user_count = params
+                .get(2)
+                .and_then(|b| std::str::from_utf8(b).ok())
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0);
+            let topic = params.get(3).cloned().unwrap_or_default();
+            Some(ClientEvent::ListEntry {
+                network: id,
+                channel,
+                user_count,
+                topic,
+            })
+        }
+        // RPL_LISTEND
+        Command::Numeric { code: 323, .. } => Some(ClientEvent::ListEnd { network: id }),
         Command::Numeric { code, params } => {
             let p: Vec<Bytes> = params.iter().cloned().collect();
             Some(ClientEvent::Numeric {
@@ -418,6 +436,16 @@ fn translate_command(cmd: &ClientCommand) -> Option<Message> {
             }
             .to_message(),
         ),
-        ClientCommand::Connect { .. } | ClientCommand::Disconnect { .. } => None,
+        ClientCommand::List { .. } => Some(
+            Command::Unknown {
+                verb: Bytes::from_static(b"LIST"),
+                params: Params::new(),
+            }
+            .to_message(),
+        ),
+        ClientCommand::Connect { .. }
+        | ClientCommand::Disconnect { .. }
+        | ClientCommand::DccAcceptChat { .. }
+        | ClientCommand::DccAcceptSend { .. } => None,
     }
 }

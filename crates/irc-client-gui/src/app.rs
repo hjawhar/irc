@@ -76,6 +76,15 @@ pub(crate) struct IrcApp {
 
     /// Current input bar contents.
     input_value: String,
+
+    /// Channel list entries accumulated from LIST replies.
+    channel_list_entries: Vec<views::channel_list::ListEntry>,
+    /// Filter text for channel list.
+    channel_list_filter: String,
+    /// Whether the channel list is currently loading.
+    channel_list_loading: bool,
+    /// Whether to show the channel list overlay.
+    show_channel_list: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +107,13 @@ pub(crate) enum Msg {
     /// Placeholder for events we don't handle yet.
     #[allow(dead_code)]
     Noop,
+    /// Channel list filter text changed.
+    ListFilterChanged(String),
+    /// User clicked a channel name in the list to join it.
+    ListJoinChannel(Bytes),
+    /// Close the channel list overlay.
+    #[allow(dead_code)]
+    ListClose,
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +139,10 @@ impl IrcApp {
             windows: HashMap::new(),
             networks: HashMap::new(),
             input_value: String::new(),
+            channel_list_entries: Vec::new(),
+            channel_list_filter: String::new(),
+            channel_list_loading: false,
+            show_channel_list: false,
         };
 
         (app, Task::none())
@@ -154,6 +174,27 @@ impl IrcApp {
                 info!("connect pressed (stub)");
             }
             Msg::Noop => {}
+            Msg::ListFilterChanged(f) => {
+                self.channel_list_filter = f;
+            }
+            Msg::ListJoinChannel(channel) => {
+                if let Some(win_id) = self.active_window {
+                    if let Some(win) = self.windows.get(&win_id) {
+                        let cmd = ClientCommand::Join {
+                            network: win.network,
+                            channel,
+                        };
+                        let tx = self.command_tx.clone();
+                        tokio::spawn(async move {
+                            let _ = tx.send(cmd).await;
+                        });
+                    }
+                }
+                self.show_channel_list = false;
+            }
+            Msg::ListClose => {
+                self.show_channel_list = false;
+            }
         }
         Task::none()
     }
@@ -176,14 +217,29 @@ impl IrcApp {
                 from,
                 text,
             } => {
-                let win_id = self.ensure_window(network, target);
+                let win_id = self.ensure_window(network, target.clone());
+                let from_str = String::from_utf8_lossy(&from).into_owned();
+                let text_str = String::from_utf8_lossy(&text).into_owned();
                 if let Some(win) = self.windows.get_mut(&win_id) {
                     win.messages.push(DisplayMessage {
                         timestamp: now_stamp(),
-                        from: String::from_utf8_lossy(&from).into_owned(),
-                        text: String::from_utf8_lossy(&text).into_owned(),
+                        from: from_str.clone(),
+                        text: text_str.clone(),
                         is_action: false,
                     });
+                }
+                // Desktop notification for PMs and highlights.
+                let own_nick = self.networks.get(&network).map(|n| n.name.as_str());
+                let target_bytes = target.as_ref();
+                let is_pm = own_nick.is_some_and(|n| target_bytes == n.as_bytes());
+                let is_highlight = !is_pm
+                    && own_nick.is_some_and(|n| {
+                        text_str
+                            .to_ascii_lowercase()
+                            .contains(&n.to_ascii_lowercase())
+                    });
+                if is_pm || is_highlight {
+                    crate::notifications::notify_message(&from_str, &text_str, is_pm);
                 }
             }
             ClientEvent::Notice {
@@ -256,10 +312,30 @@ impl IrcApp {
             ClientEvent::Disconnected { network, reason } => {
                 warn!(%reason, "network {} disconnected", network.0);
             }
+            ClientEvent::ListEntry {
+                channel,
+                user_count,
+                topic,
+                ..
+            } => {
+                self.channel_list_entries
+                    .push(views::channel_list::ListEntry {
+                        channel,
+                        user_count,
+                        topic: String::from_utf8_lossy(&topic).into_owned(),
+                    });
+            }
+            ClientEvent::ListEnd { .. } => {
+                self.channel_list_loading = false;
+            }
             ClientEvent::NickChange { .. }
             | ClientEvent::Quit { .. }
             | ClientEvent::Numeric { .. }
-            | ClientEvent::Error { .. } => {
+            | ClientEvent::Error { .. }
+            | ClientEvent::DccChatRequest { .. }
+            | ClientEvent::DccSendRequest { .. }
+            | ClientEvent::DccProgress { .. }
+            | ClientEvent::DccComplete { .. } => {
                 // Handled minimally for the skeleton.
             }
         }
@@ -277,6 +353,21 @@ impl IrcApp {
         let Some(win) = self.windows.get(&win_id) else {
             return;
         };
+
+        if text.eq_ignore_ascii_case("/list") {
+            self.channel_list_entries.clear();
+            self.channel_list_filter.clear();
+            self.channel_list_loading = true;
+            self.show_channel_list = true;
+            let cmd = ClientCommand::List {
+                network: win.network,
+            };
+            let tx = self.command_tx.clone();
+            tokio::spawn(async move {
+                let _ = tx.send(cmd).await;
+            });
+            return;
+        }
 
         let cmd = ClientCommand::SendPrivmsg {
             network: win.network,
@@ -370,6 +461,15 @@ impl IrcApp {
             row![treebar, scrollback, nicklist].height(Fill),
             input
         ];
+
+        if self.show_channel_list {
+            let list_view = views::channel_list::view(
+                &self.channel_list_entries,
+                &self.channel_list_filter,
+                self.channel_list_loading,
+            );
+            return container(list_view).width(Fill).height(Fill).into();
+        }
 
         container(middle).width(Fill).height(Fill).into()
     }

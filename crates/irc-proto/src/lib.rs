@@ -22,6 +22,7 @@ pub mod isupport;
 
 pub mod command;
 pub mod ctcp;
+pub mod dcc;
 pub mod format;
 
 pub mod error;
@@ -41,6 +42,7 @@ pub use casemap::Casemap;
 pub use codec::{CodecError, IrcCodec};
 pub use command::{CapSub, Command, CommandError};
 pub use ctcp::CtcpMessage;
+pub use dcc::DccRequest;
 pub use error::ParseError;
 pub use format::{Color, Style, StyledSpan, parse_styled, strip_formatting};
 pub use ident::{AccountName, ChannelName, IdentError, Nick, ServerName};

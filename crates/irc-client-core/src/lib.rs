@@ -8,6 +8,7 @@
 
 pub mod client;
 pub mod command;
+pub mod dcc;
 pub mod event;
 pub mod network;
 pub mod scripting;
