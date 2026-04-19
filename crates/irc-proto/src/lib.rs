@@ -14,9 +14,12 @@ pub mod casemap;
 
 pub mod ident;
 
+pub mod command;
+
 pub mod error;
 pub mod limits;
 pub mod message;
+pub mod numeric;
 pub mod params;
 pub mod prefix;
 pub mod tags;
@@ -25,9 +28,11 @@ pub mod verb;
 mod util;
 
 pub use casemap::Casemap;
+pub use command::{CapSub, Command, CommandError};
 pub use error::ParseError;
 pub use ident::{AccountName, ChannelName, IdentError, Nick, ServerName};
 pub use message::Message;
+pub use numeric::ReplyCode;
 pub use params::Params;
 pub use prefix::Prefix;
 pub use tags::{Tag, TagKey, Tags};
