@@ -32,14 +32,20 @@ async fn join_creates_channel_and_returns_names() {
 
     // Expect JOIN echo, NAMES reply (with @alice since first joiner gets op).
     let msgs = collect_until_numeric(&mut c, ReplyCode::RPL_ENDOFNAMES).await;
-    let join_echo = msgs.iter().find(|m| matches!(&m.verb, Verb::Word(w) if w.as_ref() == b"JOIN"));
+    let join_echo = msgs
+        .iter()
+        .find(|m| matches!(&m.verb, Verb::Word(w) if w.as_ref() == b"JOIN"));
     assert!(join_echo.is_some(), "JOIN should be echoed back");
 
     let names = msgs
         .iter()
         .find(|m| matches!(m.verb, Verb::Numeric(c) if c == ReplyCode::RPL_NAMREPLY.code()));
     assert!(names.is_some(), "RPL_NAMREPLY expected");
-    let names_text = names.unwrap().params.last().map(|b| String::from_utf8_lossy(b).to_string());
+    let names_text = names
+        .unwrap()
+        .params
+        .last()
+        .map(|b| String::from_utf8_lossy(b).to_string());
     assert!(
         names_text.as_deref().unwrap_or("").contains("@alice"),
         "first joiner should be op: {names_text:?}"
@@ -47,7 +53,11 @@ async fn join_creates_channel_and_returns_names() {
 
     shutdown.signal();
     drop(c);
-    tokio::time::timeout(Duration::from_secs(5), serve).await.unwrap().unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), serve)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -74,8 +84,13 @@ async fn privmsg_between_two_users_in_channel() {
     send(&mut alice, "PRIVMSG #chat :hello bob").await;
 
     // Bob should receive it.
-    let bob_msg = recv_timeout(&mut bob, Duration::from_secs(2)).await.expect("bob gets msg");
-    assert_eq!(bob_msg.params.last().map(Bytes::as_ref), Some(&b"hello bob"[..]));
+    let bob_msg = recv_timeout(&mut bob, Duration::from_secs(2))
+        .await
+        .expect("bob gets msg");
+    assert_eq!(
+        bob_msg.params.last().map(Bytes::as_ref),
+        Some(&b"hello bob"[..])
+    );
 
     // Alice should NOT see her own message (echo-message is off in MVP).
     let alice_echo = recv_timeout(&mut alice, Duration::from_millis(500)).await;
@@ -84,7 +99,11 @@ async fn privmsg_between_two_users_in_channel() {
     shutdown.signal();
     drop(alice);
     drop(bob);
-    tokio::time::timeout(Duration::from_secs(5), serve).await.unwrap().unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), serve)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -98,13 +117,19 @@ async fn privmsg_to_nick_is_delivered() {
     let mut bob = register(addr, "bob").await;
 
     send(&mut alice, "PRIVMSG bob :hey").await;
-    let msg = recv_timeout(&mut bob, Duration::from_secs(2)).await.expect("bob gets pm");
+    let msg = recv_timeout(&mut bob, Duration::from_secs(2))
+        .await
+        .expect("bob gets pm");
     assert_eq!(msg.params.last().map(Bytes::as_ref), Some(&b"hey"[..]));
 
     shutdown.signal();
     drop(alice);
     drop(bob);
-    tokio::time::timeout(Duration::from_secs(5), serve).await.unwrap().unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), serve)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -119,12 +144,18 @@ async fn part_echoes_and_cleans_channel() {
     drain_until_numeric(&mut alice, ReplyCode::RPL_ENDOFNAMES).await;
 
     send(&mut alice, "PART #tmp :bye").await;
-    let part = recv_timeout(&mut alice, Duration::from_secs(2)).await.expect("PART echo");
+    let part = recv_timeout(&mut alice, Duration::from_secs(2))
+        .await
+        .expect("PART echo");
     assert!(matches!(&part.verb, Verb::Word(w) if w.as_ref() == b"PART"));
 
     shutdown.signal();
     drop(alice);
-    tokio::time::timeout(Duration::from_secs(5), serve).await.unwrap().unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), serve)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -140,18 +171,29 @@ async fn topic_set_and_read() {
 
     send(&mut alice, "TOPIC #topic :Hello World").await;
     // The TOPIC change should be echoed.
-    let echo = recv_timeout(&mut alice, Duration::from_secs(2)).await.expect("TOPIC echo");
+    let echo = recv_timeout(&mut alice, Duration::from_secs(2))
+        .await
+        .expect("TOPIC echo");
     assert!(matches!(&echo.verb, Verb::Word(w) if w.as_ref() == b"TOPIC"));
 
     // Read the topic back.
     send(&mut alice, "TOPIC #topic").await;
-    let topic = recv_timeout(&mut alice, Duration::from_secs(2)).await.expect("RPL_TOPIC");
+    let topic = recv_timeout(&mut alice, Duration::from_secs(2))
+        .await
+        .expect("RPL_TOPIC");
     assert_eq!(topic.verb, Verb::Numeric(ReplyCode::RPL_TOPIC.code()));
-    assert_eq!(topic.params.last().map(Bytes::as_ref), Some(&b"Hello World"[..]));
+    assert_eq!(
+        topic.params.last().map(Bytes::as_ref),
+        Some(&b"Hello World"[..])
+    );
 
     shutdown.signal();
     drop(alice);
-    tokio::time::timeout(Duration::from_secs(5), serve).await.unwrap().unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), serve)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }
 
 // ----- helpers -----

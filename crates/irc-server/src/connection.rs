@@ -8,25 +8,90 @@
 //! broadcasting a QUIT to every peer that shares a channel.
 
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use irc_proto::{IrcCodec, Message, Params, Prefix, Tags, Verb};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_util::codec::{FramedRead, FramedWrite};
 use tracing::{Instrument, debug, info, info_span, warn};
 
+use crate::flood::FloodBucket;
 use crate::handler::{Outcome, dispatch};
+use crate::limiter::ConnectionLimiter;
 use crate::state::{ServerState, User, UserId};
 
 /// Bounded capacity for the per-connection outbound queue.
 /// Overflow drops the message — Phase 5 tightens this with a policy.
 const OUTBOUND_QUEUE: usize = 256;
 
+/// A stream that is either plain TCP or TLS-wrapped TCP.
+pub enum MaybeTls {
+    /// Unencrypted TCP connection.
+    Plain(TcpStream),
+    /// TLS-encrypted TCP connection.
+    Tls(Box<tokio_rustls::server::TlsStream<TcpStream>>),
+}
+
+impl AsyncRead for MaybeTls {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Plain(s) => Pin::new(s).poll_read(cx, buf),
+            Self::Tls(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for MaybeTls {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            Self::Plain(s) => Pin::new(s).poll_write(cx, buf),
+            Self::Tls(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Plain(s) => Pin::new(s).poll_flush(cx),
+            Self::Tls(s) => Pin::new(s.as_mut()).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Plain(s) => Pin::new(s).poll_shutdown(cx),
+            Self::Tls(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
+        }
+    }
+}
+
 /// Drive a single accepted connection to completion.
-pub async fn handle_connection(state: Arc<ServerState>, stream: TcpStream, peer: SocketAddr) {
+pub async fn handle_connection(
+    state: Arc<ServerState>,
+    limiter: Arc<ConnectionLimiter>,
+    stream: MaybeTls,
+    peer: SocketAddr,
+) {
+    let ip = peer.ip();
+    if !limiter.try_acquire(ip, state.config().limits.per_ip_max_connections) {
+        warn!(%peer, "per-IP connection limit reached, dropping");
+        return;
+    }
+
     let user_id = state.next_user_id();
     let span = info_span!("conn", user = user_id.get(), %peer);
     async move {
@@ -37,18 +102,27 @@ pub async fn handle_connection(state: Arc<ServerState>, stream: TcpStream, peer:
     }
     .instrument(span)
     .await;
+    limiter.release(ip);
 }
 
-async fn run(state: Arc<ServerState>, stream: TcpStream, user_id: UserId, peer: SocketAddr) {
-    let _ = stream.set_nodelay(true);
-    let (read_half, write_half) = stream.into_split();
+async fn run(state: Arc<ServerState>, stream: MaybeTls, user_id: UserId, peer: SocketAddr) {
+    if let MaybeTls::Plain(ref s) = stream {
+        let _ = s.set_nodelay(true);
+    }
+    let (read_half, write_half) = tokio::io::split(stream);
 
     let (out_tx, out_rx) = mpsc::channel::<Message>(OUTBOUND_QUEUE);
     let user = Arc::new(User::new(user_id, peer, out_tx));
     state.insert_user(user.clone());
 
     let writer = tokio::spawn(write_loop(write_half, out_rx));
-    read_loop(state.clone(), user.clone(), read_half).await;
+
+    // Registration deadline: drop unregistered connections after the
+    // configured timeout. Once registered the deadline is cancelled.
+    let deadline_secs = state.config().limits.registration_deadline_seconds;
+    let deadline = tokio::time::sleep(Duration::from_secs(deadline_secs));
+    tokio::pin!(deadline);
+    read_loop_with_deadline(state.clone(), user.clone(), read_half, &mut deadline).await;
 
     // Drop the user so the mpsc sender goes away. The write task sees
     // its receiver close and exits cleanly.
@@ -56,22 +130,59 @@ async fn run(state: Arc<ServerState>, stream: TcpStream, user_id: UserId, peer: 
     let _ = writer.await;
 }
 
-async fn read_loop(
+async fn read_loop_with_deadline(
     state: Arc<ServerState>,
     user: Arc<User>,
-    read_half: tokio::net::tcp::OwnedReadHalf,
+    read_half: tokio::io::ReadHalf<MaybeTls>,
+    deadline: &mut std::pin::Pin<&mut tokio::time::Sleep>,
 ) {
+    let limits = &state.config().limits;
+    let mut bucket = FloodBucket::new(limits.messages_per_second, limits.messages_burst);
     let mut reader = FramedRead::new(read_half, IrcCodec::new());
-    while let Some(frame) = reader.next().await {
+    let mut registered = false;
+    loop {
+        let frame = if registered {
+            // Already registered — no deadline.
+            reader.next().await
+        } else {
+            tokio::select! {
+                biased;
+                frame = reader.next() => frame,
+                () = &mut *deadline => {
+                    warn!("registration deadline exceeded, disconnecting");
+                    return;
+                }
+            }
+        };
+        let Some(frame) = frame else { return };
         match frame {
             Ok(message) => {
                 debug!(verb = ?message.verb, params = message.params.len(), "recv");
+                if registered && !bucket.try_consume() {
+                    warn!("flood detected, disconnecting");
+                    let error_msg = Message {
+                        tags: Tags::new(),
+                        prefix: None,
+                        verb: Verb::word(Bytes::from_static(b"ERROR")),
+                        params: {
+                            let mut p = Params::new();
+                            p.push_trailing(Bytes::from_static(b"Flooding"));
+                            p
+                        },
+                    };
+                    user.send(error_msg);
+                    return;
+                }
                 match dispatch(&state, &user, message).await {
                     Outcome::Continue => {}
                     Outcome::Disconnect => {
                         debug!("handler requested disconnect");
                         return;
                     }
+                }
+                // Check registration status after each dispatched message.
+                if !registered && user.is_registered() {
+                    registered = true;
                 }
             }
             Err(e) => {
@@ -82,7 +193,7 @@ async fn read_loop(
     }
 }
 
-async fn write_loop(write_half: tokio::net::tcp::OwnedWriteHalf, mut rx: mpsc::Receiver<Message>) {
+async fn write_loop(write_half: tokio::io::WriteHalf<MaybeTls>, mut rx: mpsc::Receiver<Message>) {
     let mut writer = FramedWrite::new(write_half, IrcCodec::new());
     while let Some(msg) = rx.recv().await {
         if let Err(e) = writer.send(msg).await {

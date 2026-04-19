@@ -11,6 +11,7 @@ use crate::state::{ServerState, User};
 pub mod channel;
 pub mod keepalive;
 pub mod messaging;
+pub mod mode;
 pub mod registration;
 
 /// Outcome of a command dispatch. Returned by handlers so the
@@ -66,6 +67,11 @@ fn dispatch_typed(state: &Arc<ServerState>, user: &Arc<User>, cmd: Command) -> O
             send_unknown_command(state, user, &verb);
             Outcome::Continue
         }
+        Command::Mode {
+            target,
+            changes,
+            args,
+        } => mode::handle_mode(state, user, &target, changes, &args),
         // Commands handled by later phases acknowledge silently so
         // the connection keeps moving forward.
         _ => {

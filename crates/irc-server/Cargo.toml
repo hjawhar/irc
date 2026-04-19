@@ -13,7 +13,7 @@ name = "irc-server"
 path = "src/main.rs"
 
 [dependencies]
-irc-proto = { path = "../irc-proto" }
+irc-proto = { path = "../irc-proto", version = "0.0.0" }
 
 anyhow = "1"
 bytes = "1"
@@ -36,9 +36,12 @@ tokio-util = { version = "0.7", features = ["codec"] }
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+
+tokio-rustls = "0.26"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "test-util"] }
 
 [lints]
 workspace = true

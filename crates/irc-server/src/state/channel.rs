@@ -47,6 +47,7 @@ pub struct Topic {
 
 /// A single channel.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // IRC channel modes are a flag bag
 pub struct Channel {
     /// Original-case channel name (e.g. `#Rust`).
     pub name: Bytes,
@@ -55,6 +56,18 @@ pub struct Channel {
     /// Members plus per-member mode bits. Sorted by [`UserId`] so
     /// iteration order is stable across snapshots.
     pub members: BTreeMap<UserId, MemberMode>,
+    /// `+n` — no external messages (default on).
+    pub mode_n: bool,
+    /// `+t` — topic lock (default on).
+    pub mode_t: bool,
+    /// `+m` — moderated (default off).
+    pub mode_m: bool,
+    /// `+i` — invite-only (default off).
+    pub mode_i: bool,
+    /// `+k` — channel key.
+    pub mode_k: Option<Bytes>,
+    /// `+l` — member limit.
+    pub mode_l: Option<u32>,
 }
 
 impl Channel {
@@ -65,6 +78,12 @@ impl Channel {
             name,
             topic: None,
             members: BTreeMap::new(),
+            mode_n: true,
+            mode_t: true,
+            mode_m: false,
+            mode_i: false,
+            mode_k: None,
+            mode_l: None,
         }
     }
 

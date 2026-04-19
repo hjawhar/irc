@@ -42,6 +42,7 @@ pub struct UserRegInfo {
 /// Mutable fields grouped under a single [`RwLock`] so every
 /// registration-state change is observed atomically.
 #[derive(Debug, Default, Clone)]
+#[allow(clippy::struct_excessive_bools)] // IRC user modes are a flag bag
 pub struct UserInner {
     /// Current nickname. `None` until NICK is accepted.
     pub nick: Option<Bytes>,
@@ -57,6 +58,10 @@ pub struct UserInner {
     /// Host string as seen on the wire (cloak applied later in
     /// Phase 3; for now it is the raw peer address).
     pub host: Bytes,
+    /// `+i` — invisible mode.
+    pub mode_i: bool,
+    /// `+w` — wallops mode.
+    pub mode_w: bool,
 }
 
 /// A connected user: identity + outbound write pipe.
@@ -152,6 +157,11 @@ impl User {
     /// Mark the user as fully registered.
     pub fn mark_registered(&self) {
         self.inner.write().registered = true;
+    }
+
+    /// Obtain a write guard to the inner mutable fields.
+    pub fn inner_write(&self) -> parking_lot::RwLockWriteGuard<'_, UserInner> {
+        self.inner.write()
     }
 
     /// Fire-and-forget send to the outbound write pipe. Drops the

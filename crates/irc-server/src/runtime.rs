@@ -11,27 +11,42 @@ use std::sync::Arc;
 
 use tokio::net::TcpListener;
 use tokio::sync::watch;
-use tracing::{error, info};
+use tokio_rustls::TlsAcceptor;
+use tracing::{error, info, warn};
 
 use crate::config::Config;
-use crate::connection::handle_connection;
+use crate::connection::{MaybeTls, handle_connection};
 use crate::error::ServerError;
+use crate::limiter::ConnectionLimiter;
+use crate::proxy_proto::read_proxy_header;
 use crate::state::ServerState;
 
 /// Bound, ready-to-serve IRC daemon.
 #[derive(Debug)]
 pub struct Server {
     state: Arc<ServerState>,
+    limiter: Arc<ConnectionLimiter>,
     listeners: Vec<BoundListener>,
     /// Subscribed at bind time so that a `signal()` called before
     /// `serve()` starts polling still wakes the eventual awaiter.
     shutdown_rx: watch::Receiver<bool>,
 }
 
-#[derive(Debug)]
+impl std::fmt::Debug for BoundListener {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BoundListener")
+            .field("addr", &self.addr)
+            .field("proxy_protocol", &self.proxy_protocol)
+            .field("tls", &self.tls_acceptor.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 struct BoundListener {
     addr: SocketAddr,
     listener: TcpListener,
+    proxy_protocol: bool,
+    tls_acceptor: Option<TlsAcceptor>,
 }
 
 /// Handle the caller keeps after moving the [`Server`] into a task.
@@ -54,16 +69,18 @@ impl Server {
     pub async fn bind(config: Config) -> Result<(Self, ShutdownHandle), ServerError> {
         let mut listeners = Vec::with_capacity(config.listeners.len());
         for lc in &config.listeners {
-            if lc.tls {
-                tracing::warn!(addr = %lc.bind, "TLS listener configured but not supported yet");
-                continue;
-            }
-            if lc.proxy_protocol {
-                tracing::warn!(
-                    addr = %lc.bind,
-                    "PROXY protocol v2 configured but not supported yet"
-                );
-            }
+            let tls_acceptor = if lc.tls {
+                // cert and key are validated present by Config::validate.
+                let (Some(cert), Some(key)) = (lc.cert.as_ref(), lc.key.as_ref()) else {
+                    return Err(ServerError::Config(crate::error::ConfigError::Invalid(
+                        format!("TLS listener on {} requires both cert and key", lc.bind),
+                    )));
+                };
+                let tls_cfg = crate::tls::load_tls_config(cert, key)?;
+                Some(TlsAcceptor::from(tls_cfg))
+            } else {
+                None
+            };
             let listener = TcpListener::bind(lc.bind)
                 .await
                 .map_err(|e| ServerError::Listener {
@@ -74,20 +91,28 @@ impl Server {
                 addr: lc.bind.to_string(),
                 source: e,
             })?;
-            info!(%addr, "listener bound");
-            listeners.push(BoundListener { addr, listener });
+            let tls_label = if lc.tls { " (TLS)" } else { "" };
+            info!(%addr, "listener bound{tls_label}");
+            listeners.push(BoundListener {
+                addr,
+                listener,
+                proxy_protocol: lc.proxy_protocol,
+                tls_acceptor,
+            });
         }
         if listeners.is_empty() {
             return Err(ServerError::Config(crate::error::ConfigError::Invalid(
-                "no usable listeners (all TLS listeners skipped)".into(),
+                "no usable listeners".into(),
             )));
         }
         let (tx, rx) = watch::channel(false);
         let state = Arc::new(ServerState::new(Arc::new(config)));
+        let limiter = Arc::new(ConnectionLimiter::new());
         let handle = ShutdownHandle(tx);
         Ok((
             Self {
                 state,
+                limiter,
                 listeners,
                 shutdown_rx: rx,
             },
@@ -111,19 +136,59 @@ impl Server {
     /// signalled via the paired [`ShutdownHandle`].
     pub async fn serve(self) -> Result<(), ServerError> {
         let state = self.state.clone();
+        let limiter = self.limiter.clone();
         let mut shutdown_rx = self.shutdown_rx;
         let mut accept_handles = Vec::new();
-        for BoundListener { addr, listener } in self.listeners {
+        for BoundListener {
+            addr,
+            listener,
+            proxy_protocol,
+            tls_acceptor,
+        } in self.listeners
+        {
             let state = state.clone();
+            let limiter = limiter.clone();
             let mut shutdown_rx = shutdown_rx.clone();
             let handle = tokio::spawn(async move {
                 loop {
                     tokio::select! {
                         res = listener.accept() => match res {
-                            Ok((stream, peer)) => {
+                            Ok((mut stream, socket_peer)) => {
                                 let state = state.clone();
+                                let limiter = limiter.clone();
+                                let tls_acceptor = tls_acceptor.clone();
                                 tokio::spawn(async move {
-                                    handle_connection(state, stream, peer).await;
+                                    // 1. PROXY protocol (on raw TCP, before TLS).
+                                    let peer = if proxy_protocol {
+                                        match read_proxy_header(&mut stream).await {
+                                            Ok(Some(a)) => a,
+                                            Ok(None) => {
+                                                tracing::debug!(%socket_peer, "PROXY LOCAL; closing");
+                                                return;
+                                            }
+                                            Err(e) => {
+                                                warn!(%socket_peer, error = %e, "PROXY header parse failed");
+                                                return;
+                                            }
+                                        }
+                                    } else {
+                                        socket_peer
+                                    };
+
+                                    // 2. TLS handshake (if configured).
+                                    let wrapped: MaybeTls = if let Some(acc) = tls_acceptor {
+                                        match acc.accept(stream).await {
+                                            Ok(tls) => MaybeTls::Tls(Box::new(tls)),
+                                            Err(e) => {
+                                                warn!(%peer, error = %e, "TLS handshake failed");
+                                                return;
+                                            }
+                                        }
+                                    } else {
+                                        MaybeTls::Plain(stream)
+                                    };
+
+                                    handle_connection(state, limiter, wrapped, peer).await;
                                 });
                             }
                             Err(e) => {
