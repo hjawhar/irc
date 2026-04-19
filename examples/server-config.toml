@@ -1,0 +1,7 @@
+# irc-server reference configuration — populated progressively per phase.
+# Canonical schema lives in `PLAN.md` §4. When Phase 2 lands, every field
+# below will be parsed and validated; until then this file is a stub.
+
+# server_name   = "irc.example.net"
+# network_name  = "ExampleNet"
+# motd_path     = "/etc/irc-server/motd.txt"

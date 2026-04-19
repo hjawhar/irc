@@ -1,0 +1,16 @@
+[package]
+name = "irc-server"
+description = "Single-node IRC daemon with IRCv3 baseline, accounts, cloaks, and SQLite-backed state."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "irc-server"
+path = "src/main.rs"
+
+[lints]
+workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "irc-client-gui"
+description = "mIRC-style desktop IRC client built on iced."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "irc-client-gui"
+path = "src/main.rs"
+
+[lints]
+workspace = true
