@@ -2271,7 +2271,7 @@ checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
 
 [[package]]
 name = "irc-bnc"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2290,11 +2290,11 @@ dependencies = [
 
 [[package]]
 name = "irc-cli"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "irc-client-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "futures-util",
@@ -2311,7 +2311,7 @@ dependencies = [
 
 [[package]]
 name = "irc-client-gui"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "iced",
@@ -2325,7 +2325,7 @@ dependencies = [
 
 [[package]]
 name = "irc-proto"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "proptest",
@@ -2336,7 +2336,7 @@ dependencies = [
 
 [[package]]
 name = "irc-server"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2367,7 +2367,7 @@ dependencies = [
 
 [[package]]
 name = "irc-testkit"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "is_terminal_polyfill"

@@ -12,7 +12,7 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
-irc-proto = { path = "../irc-proto", version = "0.0.0" }
+irc-proto = { path = "../irc-proto", version = "0.1.0" }
 bytes = "1"
 tokio = { version = "1", features = ["rt", "net", "sync", "time", "io-util", "macros", "fs"] }
 tokio-util = { version = "0.7", features = ["codec"] }
