@@ -10,6 +10,10 @@
 
 #![deny(missing_docs)]
 
+pub mod casemap;
+
+pub mod ident;
+
 pub mod error;
 pub mod limits;
 pub mod message;
@@ -20,7 +24,9 @@ pub mod verb;
 
 mod util;
 
+pub use casemap::Casemap;
 pub use error::ParseError;
+pub use ident::{AccountName, ChannelName, IdentError, Nick, ServerName};
 pub use message::Message;
 pub use params::Params;
 pub use prefix::Prefix;

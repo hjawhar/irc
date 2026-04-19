@@ -39,6 +39,10 @@ option_if_let_else = "allow"
 # `pub(crate)` inside a private module is clearer than a bare `pub` that
 # happens to have the same effective visibility; prefer explicit scoping.
 redundant_pub_crate = "allow"
+# `missing_const_for_fn` reaches into trait-dispatched paths (e.g.
+# `Bytes: Deref`) that aren't const-friendly and produces impractical
+# suggestions; opt out at workspace level.
+missing_const_for_fn = "allow"
 
 [profile.release]
 lto = "thin"
