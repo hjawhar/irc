@@ -998,6 +998,21 @@ checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
 [[package]]
 name = "irc-bnc"
 version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "futures-util",
+ "irc-proto",
+ "parking_lot",
+ "serde",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "irc-cli"
@@ -1006,6 +1021,17 @@ version = "0.0.0"
 [[package]]
 name = "irc-client-core"
 version = "0.0.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "irc-proto",
+ "rustls",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tracing",
+]
 
 [[package]]
 name = "irc-client-gui"

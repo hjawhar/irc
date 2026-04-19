@@ -1,7 +1,17 @@
-//! Headless IRC client library: connection management, IRCv3 client side,
-//! event/command channels, scrollback buffers, scripting integration.
+//! Headless IRC client library: connection management, event/command
+//! channels, and client-side state tracking.
 //!
-//! Phase 0 ships only the crate skeleton. Full surface lands in Phase 8
-//! (see `PLAN.md` §6).
+//! The primary entry point is [`Client`], which manages multiple network
+//! connections and exposes a single event stream to the frontend.
 
 #![deny(missing_docs)]
+
+pub mod client;
+pub mod command;
+pub mod event;
+pub mod network;
+pub mod state;
+
+pub use client::Client;
+pub use command::ClientCommand;
+pub use event::{ClientEvent, NetworkId};
