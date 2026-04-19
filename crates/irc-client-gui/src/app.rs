@@ -10,6 +10,7 @@ use tracing::{info, warn};
 use irc_client_core::{Client, ClientCommand, ClientEvent, NetworkId};
 
 use crate::theme;
+use crate::theme::ThemeChoice;
 use crate::views;
 use crate::views::connect_dialog::{ConnectField, ConnectForm};
 
@@ -99,6 +100,8 @@ pub(crate) struct IrcApp {
     channel_list_filter: String,
     channel_list_loading: bool,
     show_channel_list: bool,
+    /// Current light/dark theme selection.
+    theme_choice: ThemeChoice,
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +124,8 @@ pub(crate) enum Msg {
     ListClose,
     #[allow(dead_code)]
     Noop,
+    /// Toggle between light and dark themes.
+    ToggleTheme,
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +155,7 @@ impl IrcApp {
             channel_list_filter: String::new(),
             channel_list_loading: false,
             show_channel_list: false,
+            theme_choice: ThemeChoice::default(),
         };
 
         (app, Task::none())
@@ -201,6 +207,9 @@ impl IrcApp {
             }
             Msg::ListClose => self.show_channel_list = false,
             Msg::Noop => {}
+            Msg::ToggleTheme => {
+                self.theme_choice = self.theme_choice.toggle();
+            }
         }
         Task::none()
     }
@@ -349,7 +358,9 @@ impl IrcApp {
                 nick,
             } => {
                 let nick_str = String::from_utf8_lossy(&nick).into_owned();
-                let win_id = self.ensure_window(network, channel);
+                let own = self.own_nick.get(&network).cloned().unwrap_or_default();
+                let is_self = nick_str == own;
+                let win_id = self.ensure_window(network, channel.clone());
                 if let Some(win) = self.windows.get_mut(&win_id) {
                     if !win.nicks.contains(&nick_str) {
                         win.nicks.push(nick_str.clone());
@@ -361,6 +372,10 @@ impl IrcApp {
                         text: format!("{nick_str} has joined"),
                         is_action: true,
                     });
+                }
+                // Show welcome guidelines when WE join a channel.
+                if is_self {
+                    self.show_welcome_guidelines(network, channel.as_ref());
                 }
             }
             ClientEvent::Part {
@@ -610,6 +625,16 @@ impl IrcApp {
                         });
                     }
                 }
+                "help" | "commands" => {
+                    self.show_help(net_id);
+                }
+                "theme" => {
+                    self.theme_choice = self.theme_choice.toggle();
+                    self.push_status(
+                        net_id,
+                        &format!("Theme switched to {}", self.theme_choice.label()),
+                    );
+                }
                 _ => {
                     self.push_status(net_id, &format!("Unknown command: /{cmd}"));
                 }
@@ -652,6 +677,56 @@ impl IrcApp {
                     timestamp: now_stamp(),
                     from: String::from("*"),
                     text: text.to_owned(),
+                    is_action: false,
+                });
+            }
+        }
+    }
+
+    fn show_help(&mut self, network: NetworkId) {
+        let lines = [
+            "=== Available Commands ===",
+            "/connect <host> [port] [nick]  — Connect to a server",
+            "/server <host> [port] [nick]   — Alias for /connect",
+            "/join <#channel>               — Join a channel",
+            "/part [#channel] [reason]      — Leave a channel",
+            "/nick <newnick>                — Change your nickname",
+            "/msg <nick> <message>          — Send a private message",
+            "/topic <text>                  — Set the channel topic",
+            "/list                          — Browse channel list",
+            "/quit [reason]                 — Disconnect from server",
+            "/raw <line>                    — Send a raw IRC command",
+            "/theme                         — Toggle light/dark theme",
+            "/help                          — Show this help",
+            "",
+            "=== Guidelines ===",
+            "1. Be respectful to others.",
+            "2. No spam or flooding — the server enforces rate limits.",
+            "3. Register your nick with /msg NickServ REGISTER",
+            "   or use: REGISTER <account> <email> <password>",
+            "4. Channel ops (@) can set topic, kick, and ban users.",
+            "5. Use /list to discover channels.",
+            "6. Private messages: /msg <nick> <text>",
+        ];
+        for line in lines {
+            self.push_status(network, line);
+        }
+    }
+
+    fn show_welcome_guidelines(&mut self, network: NetworkId, channel: &[u8]) {
+        let chan = String::from_utf8_lossy(channel);
+        let win_id = self.ensure_window(network, Bytes::copy_from_slice(channel));
+        let lines = [
+            format!("Welcome to {chan}!"),
+            String::from("Type /help for a list of commands."),
+            String::from("Be respectful. No spam. Have fun."),
+        ];
+        if let Some(win) = self.windows.get_mut(&win_id) {
+            for line in lines {
+                win.messages.push(DisplayMessage {
+                    timestamp: now_stamp(),
+                    from: String::from("*"),
+                    text: line,
                     is_action: false,
                 });
             }
@@ -763,16 +838,24 @@ impl IrcApp {
             String::from(" [/connect host port nick] or use File > Connect")
         };
 
-        let status_bar = container(text(status_text).size(11))
-            .style(theme::topic_bar)
-            .width(Fill)
-            .padding(2);
+        let theme_label = format!("Theme: {}", self.theme_choice.label());
+        let theme_btn = iced::widget::button(text(theme_label).size(11))
+            .padding([2, 8])
+            .on_press(Msg::ToggleTheme);
+
+        let status_row = row![
+            container(text(status_text).size(11))
+                .style(theme::topic_bar)
+                .width(Fill)
+                .padding(2),
+            theme_btn,
+        ];
 
         let middle = column![
             topic_bar,
             row![treebar, scrollback, nicklist].height(Fill),
             input,
-            status_bar,
+            status_row,
         ];
 
         if self.show_channel_list {
@@ -793,9 +876,8 @@ impl IrcApp {
 // ---------------------------------------------------------------------------
 
 impl IrcApp {
-    #[allow(clippy::unused_self)]
     pub(crate) fn theme(&self) -> Theme {
-        theme::dark()
+        self.theme_choice.to_iced()
     }
 }
 
