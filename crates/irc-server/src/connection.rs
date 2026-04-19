@@ -117,6 +117,25 @@ async fn run(state: Arc<ServerState>, stream: MaybeTls, user_id: UserId, peer: S
 
     let writer = tokio::spawn(write_loop(write_half, out_rx));
 
+    // K-line check: reject banned hosts before registration.
+    let peer_host = peer.ip().to_string();
+    if let Some(kl) = state.is_klined(&peer_host) {
+        let mut params = Params::new();
+        params.push_trailing(Bytes::from(
+            format!("Closing Link: You are banned ({})", kl.reason).into_bytes(),
+        ));
+        user.send(Message {
+            tags: Tags::new(),
+            prefix: None,
+            verb: Verb::word(Bytes::from_static(b"ERROR")),
+            params,
+        });
+        // Give the writer a moment to flush, then tear down.
+        drop(user);
+        let _ = writer.await;
+        return;
+    }
+
     // Registration deadline: drop unregistered connections after the
     // configured timeout. Once registered the deadline is cancelled.
     let deadline_secs = state.config().limits.registration_deadline_seconds;

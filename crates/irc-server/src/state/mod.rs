@@ -13,6 +13,7 @@ use irc_proto::Casemap;
 
 use crate::cloak::CloakEngine;
 use crate::config::Config;
+use crate::oper::glob_match;
 use crate::store::AnyStore;
 
 pub mod channel;
@@ -31,6 +32,19 @@ pub enum StateError {
     UnknownUser,
 }
 
+/// A server-wide ban entry.
+#[derive(Debug, Clone)]
+pub struct Kline {
+    /// Host mask pattern.
+    pub mask: String,
+    /// Reason shown to banned users.
+    pub reason: String,
+    /// Nick or identifier of the oper who set this.
+    pub set_by: String,
+    /// Expiry as seconds since UNIX epoch; `None` for permanent.
+    pub expires: Option<u64>,
+}
+
 /// Shared server-wide state. Cloned via `Arc` into every connection
 /// task.
 #[derive(Debug)]
@@ -45,6 +59,8 @@ pub struct ServerState {
     channels: DashMap<Bytes, Arc<parking_lot::RwLock<Channel>>>,
     casemap: Casemap,
     next_user_id: AtomicU64,
+    /// Active K-line bans.
+    klines: parking_lot::RwLock<Vec<Kline>>,
 }
 
 impl ServerState {
@@ -70,6 +86,7 @@ impl ServerState {
             channels: DashMap::new(),
             casemap: Casemap::Rfc1459,
             next_user_id: AtomicU64::new(1),
+            klines: parking_lot::RwLock::new(Vec::new()),
         }
     }
 
@@ -262,6 +279,50 @@ impl ServerState {
         }
         left
     }
+
+    // --- kline operations ---
+
+    /// Add a K-line ban.
+    pub fn add_kline(&self, kl: Kline) {
+        self.klines.write().push(kl);
+    }
+
+    /// Remove the first K-line whose mask matches exactly.
+    pub fn remove_kline(&self, mask: &str) -> bool {
+        let mut klines = self.klines.write();
+        let before = klines.len();
+        klines.retain(|k| k.mask != mask);
+        klines.len() < before
+    }
+
+    #[allow(clippy::significant_drop_tightening)] // lock held for iteration
+    /// Check if a host is banned. Expired entries are pruned lazily.
+    pub fn is_klined(&self, host: &str) -> Option<Kline> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let klines = self.klines.read();
+        for kl in klines.iter() {
+            if let Some(exp) = kl.expires {
+                if exp <= now {
+                    continue;
+                }
+            }
+            // Match the mask against *!*@host
+            let full = format!("*!*@{host}");
+            // The mask may be host-only or full user@host
+            let mask_host = if let Some((_prefix, h)) = kl.mask.rsplit_once('@') {
+                h
+            } else {
+                &kl.mask
+            };
+            if glob_match(mask_host, host) || glob_match(&kl.mask, &full) {
+                return Some(kl.clone());
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -340,5 +401,33 @@ mod tests {
         let other = state.next_user_id();
         state.insert_user(mk_user(other));
         state.claim_nick(other, b"alice").unwrap();
+    }
+
+    #[test]
+    fn kline_add_match_remove() {
+        let state = mk_state();
+        state.add_kline(super::Kline {
+            mask: "192.168.*".into(),
+            reason: "test ban".into(),
+            set_by: "admin".into(),
+            expires: None,
+        });
+        assert!(state.is_klined("192.168.1.1").is_some());
+        assert!(state.is_klined("10.0.0.1").is_none());
+        // Remove and verify.
+        assert!(state.remove_kline("192.168.*"));
+        assert!(state.is_klined("192.168.1.1").is_none());
+    }
+
+    #[test]
+    fn kline_expired_not_matched() {
+        let state = mk_state();
+        state.add_kline(super::Kline {
+            mask: "10.0.*".into(),
+            reason: "expired".into(),
+            set_by: "admin".into(),
+            expires: Some(1), // epoch 1 — already expired
+        });
+        assert!(state.is_klined("10.0.0.1").is_none());
     }
 }

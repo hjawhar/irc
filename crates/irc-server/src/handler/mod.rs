@@ -13,6 +13,7 @@ pub mod channel;
 pub mod keepalive;
 pub mod messaging;
 pub mod mode;
+pub mod oper;
 pub mod registration;
 pub mod sasl;
 
@@ -40,6 +41,7 @@ pub async fn dispatch(state: &Arc<ServerState>, user: &Arc<User>, msg: Message) 
     }
 }
 
+#[allow(clippy::cognitive_complexity)] // flat match on Command variants
 async fn dispatch_typed(state: &Arc<ServerState>, user: &Arc<User>, cmd: Command) -> Outcome {
     match cmd {
         Command::Cap { subcommand, args } => {
@@ -85,6 +87,26 @@ async fn dispatch_typed(state: &Arc<ServerState>, user: &Arc<User>, cmd: Command
             }
             account::handle_verify(state, user, &params[0], &params[1]).await
         }
+        Command::Unknown {
+            ref verb,
+            ref params,
+        } if verb.as_ref() == b"OPER" => oper::handle_oper(state, user, params),
+        Command::Unknown {
+            ref verb,
+            ref params,
+        } if verb.as_ref() == b"KILL" => oper::handle_kill(state, user, params),
+        Command::Unknown {
+            ref verb,
+            ref params,
+        } if verb.as_ref() == b"KLINE" => oper::handle_kline(state, user, params),
+        Command::Unknown {
+            ref verb,
+            ref params,
+        } if verb.as_ref() == b"UNKLINE" => oper::handle_unkline(state, user, params),
+        Command::Unknown {
+            ref verb,
+            ref params,
+        } if verb.as_ref() == b"SHOWHOST" => oper::handle_showhost(state, user, params),
         Command::Unknown { verb, .. } => {
             warn!(verb = ?verb, "unknown command");
             send_unknown_command(state, user, &verb);

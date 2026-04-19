@@ -4,6 +4,7 @@
 //! construct configs programmatically via [`Config::builder`]; the
 //! `main.rs` binary loads a config file via [`Config::from_toml_path`].
 
+use std::collections::HashMap;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::error::ConfigError;
+use crate::oper::{OperBlock, OperClass};
 
 /// Top-level server configuration.
 #[derive(Debug, Clone, Deserialize)]
@@ -42,6 +44,12 @@ pub struct Config {
     /// Storage backend configuration.
     #[serde(default)]
     pub storage: StorageConfig,
+    /// Server operator blocks.
+    #[serde(default, rename = "oper")]
+    pub opers: Vec<OperBlock>,
+    /// Oper class definitions.
+    #[serde(default, rename = "oper_class")]
+    pub oper_classes: HashMap<String, OperClass>,
 }
 
 /// Storage configuration.
@@ -239,6 +247,8 @@ impl Default for ConfigBuilder {
                 cloak_secret_file: None,
                 limits: Limits::default(),
                 storage: StorageConfig::default(),
+                opers: Vec::new(),
+                oper_classes: HashMap::new(),
             },
         }
     }

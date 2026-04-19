@@ -71,6 +71,10 @@ pub struct UserInner {
     pub cert_fingerprint: Option<String>,
     /// Active SASL mechanism during authentication.
     pub sasl_mechanism: Option<String>,
+    /// Whether this user is a server operator.
+    pub is_oper: bool,
+    /// Name of the oper class, if opered up.
+    pub oper_class: Option<String>,
 }
 
 /// A connected user: identity + outbound write pipe.
@@ -177,6 +181,35 @@ impl User {
     /// Set the logged-in account name.
     pub fn set_account(&self, name: String) {
         self.inner.write().account = Some(name);
+    }
+
+    /// Mark this user as a server operator with the given class.
+    pub fn set_oper(&self, class: String) {
+        let mut inner = self.inner.write();
+        inner.is_oper = true;
+        inner.oper_class = Some(class);
+    }
+
+    /// Check whether this user holds a specific oper privilege.
+    pub fn has_privilege(
+        &self,
+        state: &crate::state::ServerState,
+        priv_: crate::oper::Privilege,
+    ) -> bool {
+        let inner = self.inner.read();
+        if !inner.is_oper {
+            return false;
+        }
+        let Some(class_name) = inner.oper_class.as_deref() else {
+            return false;
+        };
+        let class_name = class_name.to_owned();
+        drop(inner);
+        state
+            .config()
+            .oper_classes
+            .get(&class_name)
+            .is_some_and(|oc| oc.privileges.contains(&priv_))
     }
 
     /// Obtain a write guard to the inner mutable fields.

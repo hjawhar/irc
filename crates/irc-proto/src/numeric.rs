@@ -117,6 +117,9 @@ replycode! {
     RPL_MOTDSTART = 375,
     RPL_ENDOFMOTD = 376,
 
+    // --- Oper ---
+    RPL_YOUREOPER = 381,
+
     // --- Channel info ---
     RPL_BANLIST = 367,
     RPL_ENDOFBANLIST = 368,
