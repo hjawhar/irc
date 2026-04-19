@@ -13,6 +13,7 @@ pub mod channel;
 pub mod keepalive;
 pub mod messaging;
 pub mod mode;
+pub mod monitor;
 pub mod oper;
 pub mod registration;
 pub mod sasl;
@@ -107,6 +108,10 @@ async fn dispatch_typed(state: &Arc<ServerState>, user: &Arc<User>, cmd: Command
             ref verb,
             ref params,
         } if verb.as_ref() == b"SHOWHOST" => oper::handle_showhost(state, user, params),
+        Command::Unknown {
+            ref verb,
+            ref params,
+        } if verb.as_ref() == b"MONITOR" => monitor::handle_monitor(state, user, params),
         Command::Unknown { verb, .. } => {
             warn!(verb = ?verb, "unknown command");
             send_unknown_command(state, user, &verb);

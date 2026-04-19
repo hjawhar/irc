@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use irc_proto::ReplyCode;
+use irc_proto::{Message, Params, Prefix, ReplyCode, Tags, Verb};
 
 use crate::handler::Outcome;
 use crate::numeric::Target;
@@ -115,6 +115,7 @@ pub async fn handle_verify(
     match state.store().account_verify(name, token_str).await {
         Ok(true) => {
             user.set_account(name.to_owned());
+            broadcast_account_notify(state, user, name);
             let msg = crate::numeric::numeric_text(
                 state,
                 target,
@@ -186,4 +187,29 @@ fn user_target(user: &User) -> Target<'_> {
 fn send_err(state: &ServerState, target: &Target<'_>, user: &User, code: ReplyCode, text: &str) {
     let msg = crate::numeric::numeric_text(state, *target, code, Bytes::from(text.to_owned()));
     user.send(msg);
+}
+
+/// Send `:<prefix> ACCOUNT <account>` to channel peers with account-notify.
+fn broadcast_account_notify(state: &ServerState, user: &Arc<User>, account: &str) {
+    let origin = user.origin_prefix();
+    let peers = state.channel_peers(user.id());
+    let mut params = Params::new();
+    params.push(Bytes::copy_from_slice(account.as_bytes()));
+    let msg = Message {
+        tags: Tags::new(),
+        prefix: Some(Prefix::User {
+            nick: origin,
+            user: None,
+            host: None,
+        }),
+        verb: Verb::word(Bytes::from_static(b"ACCOUNT")),
+        params,
+    };
+    for uid in peers {
+        if let Some(peer) = state.user(uid) {
+            if peer.caps().account_notify {
+                peer.send(msg.clone());
+            }
+        }
+    }
 }

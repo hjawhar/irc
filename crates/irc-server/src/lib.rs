@@ -9,6 +9,7 @@
 #![deny(missing_docs)]
 
 pub mod account;
+pub mod caps;
 pub mod cloak;
 pub mod config;
 pub mod connection;

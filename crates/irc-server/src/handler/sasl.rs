@@ -91,6 +91,7 @@ async fn handle_plain(state: &ServerState, user: &Arc<User>, target: &Target<'_>
     match crate::account::verify_password(&acct.password_hash, passwd) {
         Ok(true) => {
             user.set_account(acct.name.clone());
+            broadcast_account_notify(state, user, &acct.name);
             send_logged_in(state, user, target, &acct.name);
         }
         _ => {
@@ -117,6 +118,7 @@ async fn handle_external(state: &ServerState, user: &Arc<User>, target: &Target<
     }
 
     user.set_account(acct.name.clone());
+    broadcast_account_notify(state, user, &acct.name);
     send_logged_in(state, user, target, &acct.name);
 }
 
@@ -164,5 +166,30 @@ fn user_target(user: &User) -> Target<'static> {
         Target(leaked)
     } else {
         Target::UNREGISTERED
+    }
+}
+
+/// Send `:<prefix> ACCOUNT <account>` to channel peers with account-notify.
+fn broadcast_account_notify(state: &ServerState, user: &Arc<User>, account: &str) {
+    let origin = user.origin_prefix();
+    let peers = state.channel_peers(user.id());
+    let mut params = Params::new();
+    params.push(Bytes::copy_from_slice(account.as_bytes()));
+    let msg = Message {
+        tags: Tags::new(),
+        prefix: Some(Prefix::User {
+            nick: origin,
+            user: None,
+            host: None,
+        }),
+        verb: Verb::word(Bytes::from_static(b"ACCOUNT")),
+        params,
+    };
+    for uid in peers {
+        if let Some(peer) = state.user(uid) {
+            if peer.caps().account_notify {
+                peer.send(msg.clone());
+            }
+        }
     }
 }

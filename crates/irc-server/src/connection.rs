@@ -251,6 +251,7 @@ fn cleanup(state: &ServerState, user_id: UserId) {
     let Some(user) = state.user(user_id) else {
         return;
     };
+    let nick = user.snapshot().nick;
     let peers = state.channel_peers(user_id);
     let origin = user.origin_prefix();
     drop(user);
@@ -262,6 +263,10 @@ fn cleanup(state: &ServerState, user_id: UserId) {
                 u.send(quit.clone());
             }
         }
+    }
+    // MONITOR: notify watchers the nick went offline.
+    if let Some(n) = &nick {
+        crate::handler::monitor::notify_offline(state, n);
     }
     state.remove_user(user_id);
 }

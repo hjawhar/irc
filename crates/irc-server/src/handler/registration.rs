@@ -26,23 +26,27 @@ use crate::handler::Outcome;
 use crate::numeric::{Target, numeric, numeric_text, server_name_bytes};
 use crate::state::{ServerState, User, UserRegInfo};
 
-/// Handle `CAP` with the Phase 2 subset (LS, LIST, REQ, END).
+/// Handle `CAP` subcommands (IRCv3 capability negotiation).
 pub fn handle_cap(
     state: &Arc<ServerState>,
     user: &Arc<User>,
     subcommand: &irc_proto::CapSub,
-    _args: &[Bytes],
+    args: &[Bytes],
 ) -> Outcome {
     use irc_proto::CapSub;
     match subcommand {
-        CapSub::Ls | CapSub::List => {
+        CapSub::Ls => {
             user.set_cap_negotiating(true);
-            user.send(build_cap_reply(state, user, b"LS"));
+            let is_302 = args.first().is_some_and(|a| a.as_ref() == b"302");
+            user.send(build_cap_ls(state, user, is_302));
+        }
+        CapSub::List => {
+            let enabled = user.caps().enabled_names().join(" ");
+            user.send(build_cap_msg(state, user, b"LIST", &enabled));
         }
         CapSub::Req => {
-            // Phase 5 wires real caps; NAK the whole set for now.
             user.set_cap_negotiating(true);
-            user.send(build_cap_reply(state, user, b"NAK"));
+            handle_cap_req(state, user, args);
         }
         CapSub::End => {
             user.set_cap_negotiating(false);
@@ -53,15 +57,63 @@ pub fn handle_cap(
     Outcome::Continue
 }
 
-fn build_cap_reply(state: &Arc<ServerState>, user: &Arc<User>, verb: &[u8]) -> Message {
+fn handle_cap_req(state: &Arc<ServerState>, user: &Arc<User>, args: &[Bytes]) {
+    // The requested caps arrive either as multiple params or as a
+    // single space-separated trailing param.
+    let raw: Vec<u8> = args
+        .iter()
+        .flat_map(|a| {
+            let mut v = a.to_vec();
+            v.push(b' ');
+            v
+        })
+        .collect();
+    let raw_str = String::from_utf8_lossy(&raw);
+    let names: Vec<&str> = raw_str.split_whitespace().collect();
+
+    if names.is_empty() || !crate::caps::all_known(&names) {
+        user.send(build_cap_msg(state, user, b"NAK", &names.join(" ")));
+        return;
+    }
+    // All valid — enable (or disable with `-` prefix).
+    for name in &names {
+        if let Some(stripped) = name.strip_prefix('-') {
+            user.disable_cap(stripped);
+        } else {
+            user.enable_cap(name);
+        }
+    }
+    user.send(build_cap_msg(state, user, b"ACK", &names.join(" ")));
+}
+
+fn build_cap_ls(state: &Arc<ServerState>, user: &Arc<User>, is_302: bool) -> Message {
+    let cap_list = if is_302 {
+        crate::caps::ADVERTISED_CAPS
+            .iter()
+            .map(|c| {
+                if *c == "sasl" {
+                    format!("sasl={}", crate::caps::SASL_CAP_VALUE)
+                } else {
+                    (*c).to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        crate::caps::ADVERTISED_CAPS.join(" ")
+    };
+    build_cap_msg(state, user, b"LS", &cap_list)
+}
+
+fn build_cap_msg(state: &Arc<ServerState>, user: &Arc<User>, sub: &[u8], value: &str) -> Message {
     let nick_or_star = user
         .snapshot()
         .nick
         .unwrap_or_else(|| Bytes::from_static(b"*"));
     let mut params = Params::new();
     params.push(nick_or_star);
-    params.push(Bytes::copy_from_slice(verb));
-    params.push_trailing(Bytes::new());
+    params.push(Bytes::copy_from_slice(sub));
+    params.push_trailing(Bytes::from(value.to_owned().into_bytes()));
     Message {
         tags: Tags::new(),
         prefix: Some(Prefix::Server(server_name_bytes(state))),
@@ -104,8 +156,11 @@ pub fn handle_nick(state: &Arc<ServerState>, user: &Arc<User>, requested: Bytes)
     let prior = user.snapshot().nick;
     user.set_nick(requested.clone());
     if user.is_registered() {
-        if let Some(old) = prior {
-            send_nick_change(user, &old, requested);
+        if let Some(ref old) = prior {
+            // MONITOR: old nick going offline, new nick coming online.
+            crate::handler::monitor::notify_offline(state, old);
+            crate::handler::monitor::notify_online(state, requested.as_ref());
+            send_nick_change(user, old, requested);
         }
     } else {
         maybe_finalize(state, user);

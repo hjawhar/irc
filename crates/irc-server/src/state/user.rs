@@ -11,6 +11,8 @@ use irc_proto::Message;
 use parking_lot::RwLock;
 use tokio::sync::mpsc;
 
+use crate::caps::EnabledCaps;
+
 /// Unique per-connection identifier, minted by [`crate::ServerState`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UserId(u64);
@@ -75,6 +77,10 @@ pub struct UserInner {
     pub is_oper: bool,
     /// Name of the oper class, if opered up.
     pub oper_class: Option<String>,
+    /// IRCv3 caps enabled by this connection.
+    pub caps: EnabledCaps,
+    /// MONITOR list: nicks being watched for online/offline.
+    pub monitor_list: Vec<Bytes>,
 }
 
 /// A connected user: identity + outbound write pipe.
@@ -215,6 +221,22 @@ impl User {
     /// Obtain a write guard to the inner mutable fields.
     pub fn inner_write(&self) -> parking_lot::RwLockWriteGuard<'_, UserInner> {
         self.inner.write()
+    }
+
+    /// Snapshot of the enabled IRCv3 caps.
+    #[must_use]
+    pub fn caps(&self) -> EnabledCaps {
+        self.inner.read().caps.clone()
+    }
+
+    /// Enable a single cap by name. Returns `true` if recognised.
+    pub fn enable_cap(&self, name: &str) -> bool {
+        self.inner.write().caps.enable(name)
+    }
+
+    /// Disable a single cap by name. Returns `true` if recognised.
+    pub fn disable_cap(&self, name: &str) -> bool {
+        self.inner.write().caps.disable(name)
     }
 
     /// Fire-and-forget send to the outbound write pipe. Drops the

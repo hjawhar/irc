@@ -174,6 +174,13 @@ replycode! {
     RPL_REG_SUCCESS = 921,
     ERR_REG_INVALID = 922,
     ERR_REG_ALREADY_EXISTS = 923,
+
+    // --- MONITOR (IRCv3) ---
+    RPL_MONONLINE = 730,
+    RPL_MONOFFLINE = 731,
+    RPL_MONLIST = 732,
+    RPL_ENDOFMONLIST = 733,
+    ERR_MONLISTFULL = 734,
 }
 
 impl ReplyCode {

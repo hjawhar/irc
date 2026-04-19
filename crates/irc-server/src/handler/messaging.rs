@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use irc_proto::{Message, Params, Prefix, ReplyCode, Tags, Verb};
+use irc_proto::{Message, Params, Prefix, ReplyCode, Tag, TagKey, Tags, Verb};
 
 use crate::handler::Outcome;
 use crate::handler::channel::broadcast;
@@ -93,7 +93,6 @@ fn deliver_to_channel(
     };
     let guard = chan.read();
     if !guard.has_member(from_user.id()) {
-        // `+n` no-external-messages is implicit at MVP.
         let canonical = guard.name.clone();
         drop(guard);
         if emit_errors {
@@ -108,8 +107,6 @@ fn deliver_to_channel(
         return;
     }
     let canonical = guard.name.clone();
-    // Exclude the sender unless IRCv3 `echo-message` is negotiated
-    // (Phase 5). MVP: skip the sender.
     let recipients: Vec<_> = guard
         .members
         .keys()
@@ -119,6 +116,12 @@ fn deliver_to_channel(
     drop(guard);
     let msg = message_line(origin, verb, &canonical, text);
     broadcast(state, &recipients, &msg);
+
+    // IRCv3 echo-message: send the message back to the sender.
+    if from_user.caps().echo_message {
+        let echo = maybe_add_time(msg, from_user);
+        from_user.send(echo);
+    }
 }
 
 fn deliver_to_user(
@@ -142,13 +145,15 @@ fn deliver_to_user(
         }
         return;
     };
-    // Use the recipient's *original-case* nick as the target so the
-    // peer sees their preferred capitalisation echoed back.
     let canonical = recipient
         .snapshot()
         .nick
         .unwrap_or_else(|| target_nick.clone());
-    let msg = message_line(origin, verb, &canonical, text);
+    let mut msg = message_line(origin, verb, &canonical, text);
+    // Add server-time tag if recipient has it enabled.
+    if recipient.caps().server_time {
+        msg.tags = server_time_tags();
+    }
     recipient.send(msg);
 }
 
@@ -166,4 +171,67 @@ fn message_line(origin: &Bytes, verb: &'static [u8], target: &Bytes, text: &Byte
         verb: Verb::word(Bytes::copy_from_slice(verb)),
         params,
     }
+}
+
+/// Conditionally add server-time tag when user has it enabled.
+fn maybe_add_time(mut msg: Message, user: &Arc<User>) -> Message {
+    if user.caps().server_time {
+        msg.tags = server_time_tags();
+    }
+    msg
+}
+
+/// Construct a `Tags` set with only the `time` tag.
+fn server_time_tags() -> Tags {
+    let mut tags = Tags::new();
+    tags.push(server_time_tag());
+    tags
+}
+
+/// A single `time` tag with the current UTC timestamp.
+pub(crate) fn server_time_tag() -> Tag {
+    Tag {
+        key: TagKey {
+            client_only: false,
+            name: Bytes::from_static(b"time"),
+        },
+        value: Some(Bytes::from(now_iso8601().into_bytes())),
+    }
+}
+
+/// ISO 8601 timestamp with millisecond precision.
+fn now_iso8601() -> String {
+    use std::time::SystemTime;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    let millis = now.subsec_millis();
+    // Manual conversion — avoids pulling in chrono just for this.
+    let (year, month, day, hour, min, sec) = epoch_to_utc(secs);
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}.{millis:03}Z")
+}
+
+/// Convert seconds since UNIX epoch to (year, month, day, hour, min, sec).
+#[allow(clippy::similar_names)] // doe/doy from Hinnant's civil-date algorithm
+fn epoch_to_utc(epoch: u64) -> (u64, u64, u64, u64, u64, u64) {
+    let secs_per_day: u64 = 86400;
+    let days = epoch / secs_per_day;
+    let day_secs = epoch % secs_per_day;
+    let hour = day_secs / 3600;
+    let min = (day_secs % 3600) / 60;
+    let sec = day_secs % 60;
+
+    // Civil date from days since 1970-01-01 (Algorithm from Howard Hinnant).
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d, hour, min, sec)
 }
